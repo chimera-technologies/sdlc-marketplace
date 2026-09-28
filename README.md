@@ -91,11 +91,13 @@ claude.ai using the GitHub and Atlassian connectors.
    the checks still run. With a single owner, don't require a code-owner
    review: you can't approve your own PRs.
 5. **Jira Automation rule** (per Jira space):
-   - Trigger: *Label added* = `intent` (or *Issue transitioned* to "Ready for intent")
+   - Trigger: *Field value changed*, field **Labels**, change type *Value added*
+   - Condition: *Issue fields condition*, **Labels** contains any of `intent`
    - Action: *Send web request*: `POST https://api.github.com/repos/bala-chimera/sdlc-marketplace/dispatches`
-     - Headers: `Authorization: Bearer <fine-grained PAT, Contents: write on this repo only>`,
-       `Accept: application/vnd.github+json`
-     - Body: `{"event_type":"create-intent","client_payload":{"source":"jira","record_id":"{{issue.key}}"}}`
+     - Headers: `Authorization: Bearer <fine-grained PAT, Contents: write on this repo only>` (hidden),
+       `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`
+     - Body: *Custom data*: `{"event_type":"create-intent","client_payload":{"source":"jira","record_id":"{{issue.key}}"}}`
+   - GitHub answers `204 No Content` on success.
 6. **Interactive use:** trust the repo's `.claude/settings.json` when
    prompted, then run `/mcp` once to authenticate Atlassian. To try
    unreleased plugin changes, run `claude --plugin-dir plugins/sdlc`.
