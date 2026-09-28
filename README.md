@@ -74,15 +74,18 @@ claude.ai using the GitHub and Atlassian connectors.
 
 1. **Push and tag:** push this repo to `bala-chimera/sdlc-marketplace` and
    tag it `v0.1.0` (`.claude/settings.json` pins that tag for interactive use).
-2. **GitHub App** (`sdlc-bot`): permissions Contents RW, Pull requests RW,
-   Metadata R (plus organization Members R later, for team reviewers).
+2. **GitHub App** (e.g. `sdlc-bot-bala-chimera`, webhook off): permissions
+   Contents RW, Pull requests RW, Issues RW (PR labels), Metadata R (plus
+   organization Members R later, for team reviewers).
    Install it on this repo. PRs opened with its token trigger
    `intent-check` (PRs opened with `GITHUB_TOKEN` would not).
 3. **Actions variables and secrets** (Settings → Secrets and variables →
    Actions; never in a file):
    - Variables: `SDLC_APP_ID`, `JIRA_BASE_URL`
      (`https://chimeratechnologies-team-tk54z9ne.atlassian.net`), `JIRA_USER_EMAIL`
-   - Secrets: `ANTHROPIC_API_KEY`, `SDLC_APP_PRIVATE_KEY`, `JIRA_API_TOKEN`
+   - Secrets: `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token` with your Claude
+     subscription; use an `ANTHROPIC_API_KEY` instead for shared/production use),
+     `SDLC_APP_PRIVATE_KEY`, `JIRA_API_TOKEN`
 4. **Branch protection on `main`:** require the `Intent check / validate`
    status check. Private repos on a free GitHub plan can't enforce this;
    the checks still run. With a single owner, don't require a code-owner

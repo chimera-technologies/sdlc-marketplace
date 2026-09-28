@@ -29,7 +29,7 @@ README "Splitting later").
 ## Commands
 
 - Unit tests: `python -m unittest discover -s tests -v`
-- Evals (needs `ANTHROPIC_API_KEY` and the `claude` CLI):
+- Evals (needs the `claude` CLI, logged in or with `CLAUDE_CODE_OAUTH_TOKEN`):
   `python evals/run_evals.py --skill write-intent`
 - Try the plugin locally without a release: `claude --plugin-dir plugins/sdlc`
 
