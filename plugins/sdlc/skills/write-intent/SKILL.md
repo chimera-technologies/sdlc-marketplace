@@ -8,6 +8,8 @@ description: Use whenever a problem, idea, feature request, Jira ticket,
   intent", "turn this into a proto-spec", "read <file> and create an
   intent", when brainstorming reaches the point where it must be committed
   for someone else to act on, or when invoked headless with mode=headless.
+  Interactively it can split a requirement document into several intents
+  and create a Jira Epic for each (after the person confirms).
 argument-hint: "[mode=headless] [source=jira|maintain|claude-security|claude-tag] [record_id=ABC-123] [input=<path>] [slug=<slug>]"
 ---
 
@@ -62,6 +64,27 @@ note it under Open questions.
 
 No source: go to Step 2 and work from the conversation.
 
+## Step 1b: decide how many intents (documents)
+
+A requirement document often covers more than one outcome. An intent is
+one problem and its outcome, not one ticket, so decide the split before
+writing anything:
+
+- **One intent** when the document has a single goal, even if it lists
+  many requirements under it.
+- **Separate intents** for parts that have a different owner, could be
+  accepted, rejected or shipped on their own, or would push one intent past
+  a page.
+
+Tell the person what you found in a short list (for each proposed intent: a
+working title, the document sections it covers, and why it stands alone)
+and ask them to confirm or change the split. Do not split by document
+heading alone. Work items (stories, tasks) are **not** created here; they
+come from the accepted spec at the Design to Build boundary.
+
+With several intents, run Steps 2 to 5 for each one in turn, one file and
+one PR each, and list the sibling slugs in each intent's `related` field.
+
 ## Step 2: fill the content (interactive)
 
 **If a source was read:** map it onto every section of the template.
@@ -95,7 +118,7 @@ Downstream workflows parse these fields, so they are not optional:
 | `title` | Same as the H1, in the originator's words. |
 | `author` | The originator (for Jira: the reporter), not you. `Name (team/role)`. |
 | `source` | `human`, `jira`, `maintain`, `claude-security`, `claude-tag`. |
-| `record_id` | Jira key, or `none`. Required when source is `jira`. |
+| `record_id` | Jira key, or `none`. Required when source is `jira`. With no ticket (a document or a conversation), Step 5 offers to create an Epic and fills this in. |
 | `fingerprint` | Dedup key passed in by headless workflows, or `none`. |
 | `systems` | Component names as listed in `.sdlc/owners.yaml`. |
 | `owner`, `owner_role` | See routing below. Quote the value (`owner: "@org/team"`), because YAML cannot start an unquoted value with `@`. |
@@ -142,7 +165,30 @@ merged means accepted, and closed means rejected.
 
 1. Show the drafted file and ask the person to correct anything you
    misunderstood. Apply their edits and re-run the validator.
-2. **Claude Code with git:** offer to run the following, asking permission
+2. **Create the Jira Epic** when `record_id` is `none` and the Atlassian
+   MCP is connected. Every intent should have one Jira record, so the owner
+   and planners can find it there.
+   - Read `.sdlc/jira.yaml` for the site, `space_key`, `epic_issue_type`
+     and `created_label`. If the file is missing, ask which Jira space to
+     use.
+   - Search that space first (`searchJiraIssuesUsingJql`, e.g.
+     `project = <space_key> AND issuetype = Epic AND summary ~ "<key words>"`).
+     If a matching Epic already exists, offer to use it instead.
+   - Show the person exactly what will be created and **ask for a yes**
+     before creating anything:
+     - Summary: the intent's title
+     - Description: the Problem and Proposed outcome paragraphs, then
+       "Intent: `intent/<slug>.md` (PR link follows)" and the source
+       document's name
+     - Label: `created_label` (never `intent`: that label starts the Jira
+       Automation flow, which would draft a duplicate intent)
+   - Create it with `createJiraIssue`. Set `record_id` to the new key, keep
+     `source: human`, and add the key to Evidence (e.g.
+     "Jira SCRUM-12 (Epic created from <document>)").
+   - Re-run the validator.
+   If the person declines, or the MCP is not connected, leave `record_id:
+   none` and say that the intent will have no Jira link.
+3. **Claude Code with git:** offer to run the following, asking permission
    unless these commands are already allow-listed:
    ```
    git checkout -b intent/<slug>
@@ -153,13 +199,16 @@ merged means accepted, and closed means rejected.
      --body "Intent for review. Record: <record_id>. Merging accepts it and starts Design." \
      --reviewer <owner without @> --label intent
    ```
-   For a team owner (`@org/team`), use `--reviewer org/team`.
-3. **claude.ai or Cowork without git:** use the GitHub connector to create
+   For a team owner (`@org/team`), use `--reviewer org/team`. If `gh` is
+   not installed, stop after the push and give the person the link
+   `https://github.com/<owner>/<repo>/compare/main...intent/<slug>?expand=1`
+   (from `git remote get-url origin`) to open the PR in the browser.
+4. **claude.ai or Cowork without git:** use the GitHub connector to create
    the branch, commit the file and open the PR with the same title and
    body.
-4. If `record_id` is set and the Atlassian MCP is connected, add a comment
-   on the Jira issue with the PR link. The `intent-check` workflow adds
-   the merge SHA automatically after merge.
-5. Tell the person that when the owner merges the PR, Design starts
+5. If `record_id` is set and the Atlassian MCP is connected, add a comment
+   on the Jira issue with the PR link (`addCommentToJiraIssue`). The
+   `intent-check` workflow adds the merge SHA automatically after merge.
+6. Tell the person that when the owner merges the PR, Design starts
    automatically and they don't need to do anything else. If the owner
    closes it, the intent is rejected, and the reason is in the PR.

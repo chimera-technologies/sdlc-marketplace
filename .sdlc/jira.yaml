@@ -1,0 +1,11 @@
+# Where interactive write-intent creates a Jira record for an intent that
+# doesn't have one yet (e.g. one drafted from a requirement document).
+# Change it through a PR like any other config.
+
+site: chimeratechnologies-team-tk54z9ne.atlassian.net
+space_key: SCRUM            # Jira space (formerly "project") key
+epic_issue_type: Epic
+
+# Label put on Epics created alongside an intent. Deliberately NOT "intent":
+# that label fires the Jira Automation flow, which would draft a duplicate.
+created_label: intent-created

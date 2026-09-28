@@ -22,6 +22,7 @@ CLAUDE.md                           rules for Claude in this repo
 .claude-plugin/marketplace.json     marketplace chimera-sdlc (only source of skills)
 .claude/settings.json               enables sdlc@chimera-sdlc (pinned tag) for interactive use
 .sdlc/owners.yaml                   who approves intents (POC: default only)
+.sdlc/jira.yaml                     Jira space for Epics created by interactive write-intent
 .github/CODEOWNERS
 .github/workflows/
   ci.yml                            plugin: unit tests, fixtures, versions, plugin validate
@@ -67,7 +68,11 @@ Jira ticket labelled "intent"
 
 Interactive path: anyone runs `/sdlc:write-intent` (or just asks "turn
 CLM-123 into an intent") in Claude Code, which opens the same kind of PR
-and goes through the same checks. Non-engineers can do the same in
+and goes through the same checks. Given a requirement document, it first
+proposes how many intents the document needs (one per distinct outcome),
+then, with the Atlassian MCP connected, creates a Jira Epic for each intent
+after you confirm, labelled `intent-created` so the Jira flow doesn't draft
+a duplicate. Stories come later, from the accepted spec. Non-engineers can do the same in
 claude.ai using the GitHub and Atlassian connectors.
 
 ## One-time setup
