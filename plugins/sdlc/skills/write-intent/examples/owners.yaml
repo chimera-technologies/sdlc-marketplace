@@ -1,0 +1,18 @@
+# Owners fixture for the worked example (and eval seeds). Mirrors the shape
+# of a product repo's .sdlc/owners.yaml, with real-looking handles so that
+#   validate_intent.py --owners examples/owners.yaml examples/*.md
+# passes.
+
+default:
+  product_owner: "@example-org/product-owners"
+  service_owner: "@example-org/service-owners"
+
+components:
+  claims-core:
+    product_owner: "@claims-po"
+    service_owner: "@example-org/claims-sre"
+    jira_components: ["Claims Core", "Claims API"]
+  customer-portal:
+    product_owner: "@portal-po"
+    service_owner: "@example-org/web-platform"
+    jira_components: ["Customer Portal"]

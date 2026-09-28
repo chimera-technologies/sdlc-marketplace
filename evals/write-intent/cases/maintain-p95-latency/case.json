@@ -1,0 +1,25 @@
+{
+  "description": "Operational breach with no product change routes to the service owner and carries the fingerprint.",
+  "args": {
+    "source": "maintain",
+    "record_id": "none",
+    "fingerprint": "p95-latency-claims-api"
+  },
+  "expect": {
+    "frontmatter": {
+      "source": "maintain",
+      "record_id": "none",
+      "fingerprint": "p95-latency-claims-api",
+      "owner": "@example-org/claims-sre",
+      "owner_role": "service-owner"
+    },
+    "systems_include": [
+      "claims-core"
+    ],
+    "author_contains": "Maintain",
+    "author_not": "claude",
+    "body_contains": [
+      "BR-1"
+    ]
+  }
+}

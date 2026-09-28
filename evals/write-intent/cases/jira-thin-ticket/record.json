@@ -1,0 +1,21 @@
+{
+  "key": "CLM-777",
+  "fields": {
+    "summary": "Fix it",
+    "description": "As discussed on the call.",
+    "reporter": {
+      "displayName": "Sam Ortiz"
+    },
+    "components": [],
+    "priority": {
+      "name": "Medium"
+    },
+    "labels": [
+      "intent"
+    ],
+    "issuetype": {
+      "name": "Task"
+    },
+    "issuelinks": []
+  }
+}

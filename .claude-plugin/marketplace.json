@@ -1,0 +1,15 @@
+{
+  "name": "chimera-sdlc",
+  "owner": { "name": "bala-chimera (POC)" },
+  "metadata": {
+    "description": "Approved plugin marketplace for the AI-native SDLC. The only source of skills, agents and hooks."
+  },
+  "plugins": [
+    {
+      "name": "sdlc",
+      "source": "./plugins/sdlc",
+      "description": "AI-native SDLC loop: write-intent (Plan), security-policy, and guardrail hooks.",
+      "version": "0.1.0"
+    }
+  ]
+}

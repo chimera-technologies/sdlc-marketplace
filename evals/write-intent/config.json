@@ -1,0 +1,4 @@
+{
+  "owners": "../../plugins/sdlc/skills/write-intent/examples/owners.yaml",
+  "min_pass_rate": 0.8
+}

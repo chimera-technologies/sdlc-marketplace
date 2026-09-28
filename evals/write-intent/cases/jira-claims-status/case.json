@@ -1,0 +1,27 @@
+{
+  "description": "Product-facing Jira story across two components routes to the claims product owner.",
+  "args": {
+    "source": "jira",
+    "record_id": "CLM-482"
+  },
+  "expect": {
+    "frontmatter": {
+      "source": "jira",
+      "record_id": "CLM-482",
+      "owner": "@claims-po",
+      "owner_role": "product-owner",
+      "risk": [
+        "medium",
+        "high"
+      ]
+    },
+    "systems_include": [
+      "claims-core",
+      "customer-portal"
+    ],
+    "author_contains": "Priya Nair",
+    "body_contains": [
+      "CLM-482"
+    ]
+  }
+}

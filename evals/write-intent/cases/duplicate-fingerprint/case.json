@@ -1,0 +1,12 @@
+{
+  "description": "A repeat breach whose fingerprint already has an intent writes duplicate.txt instead of a new intent.",
+  "args": {
+    "source": "maintain",
+    "record_id": "none",
+    "fingerprint": "p95-latency-claims-api"
+  },
+  "expect": {
+    "duplicate": true,
+    "duplicate_of": "p95-latency-claims-api"
+  }
+}

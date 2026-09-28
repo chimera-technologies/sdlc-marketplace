@@ -1,0 +1,29 @@
+{
+  "key": "CLM-482",
+  "fields": {
+    "summary": "Let customers check claim status themselves",
+    "description": "Customers call the claims line just to ask where their claim is. Handlers spend about a third of their day on these calls instead of processing claims.\n\nWe want customers to see the current status of their own claim and what happens next, without calling.\n\nMust use the existing portal login; customers must only see their own claims. No new personal data. Legal must approve the status wording.\n\nNot in scope: uploading documents, claims run by third-party administrators.\n\nThe Q3 call-reason report shows 'claim status' is the top call reason. Success = status calls halve within three months.",
+    "reporter": {
+      "displayName": "Priya Nair"
+    },
+    "components": [
+      {
+        "name": "Claims API"
+      },
+      {
+        "name": "Customer Portal"
+      }
+    ],
+    "priority": {
+      "name": "Medium"
+    },
+    "labels": [
+      "intent",
+      "self-service"
+    ],
+    "issuetype": {
+      "name": "Story"
+    },
+    "issuelinks": []
+  }
+}

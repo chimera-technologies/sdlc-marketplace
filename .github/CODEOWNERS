@@ -1,0 +1,14 @@
+# POC: one owner for everything. When real teams join, split this into
+# product owners (intent/, specs/), platform (plugin, workflows, config)
+# and the policy owner (policy skills).
+
+# Plugin, marketplace, tests, evals, workflows and config
+*                                         @bala-chimera
+
+# SDLC artifacts: the intent-check workflow also requests review from the
+# owner named in each intent's frontmatter.
+/intent/                                  @bala-chimera
+/specs/                                   @bala-chimera
+
+# Policy skills need their named policy owner.
+/plugins/sdlc/skills/security-policy/     @bala-chimera

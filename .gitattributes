@@ -1,0 +1,7 @@
+# Normalise text files; scripts must stay LF even on Windows checkouts
+# (a CRLF run-python.sh breaks the plugin hooks under bash).
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

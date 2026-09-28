@@ -1,0 +1,19 @@
+{
+  "extraKnownMarketplaces": {
+    "chimera-sdlc": {
+      "source": { "source": "github", "repo": "bala-chimera/sdlc-marketplace", "ref": "v0.1.0" }
+    }
+  },
+  "enabledPlugins": {
+    "sdlc@chimera-sdlc": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python3 *validate_intent.py*)",
+      "Bash(python *validate_intent.py*)",
+      "Bash(git checkout -b intent/*)",
+      "Bash(git add intent/*)",
+      "Bash(gh pr create *)"
+    ]
+  }
+}

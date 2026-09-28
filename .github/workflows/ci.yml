@@ -1,0 +1,69 @@
+name: CI
+
+# Fast, no-API checks on every change to the marketplace. Make "CI / test"
+# a required status check on main.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python: ["3.9", "3.13"]   # oldest supported and current
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Unit tests (validators, hooks, eval scoring)
+        run: python -m unittest discover -s tests -v
+
+      - name: Eval fixtures are consistent
+        run: python evals/run_evals.py --skill write-intent --check-fixtures
+
+      - name: Worked example passes its own validator
+        run: |
+          python plugins/sdlc/skills/write-intent/scripts/validate_intent.py \
+            --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \
+            plugins/sdlc/skills/write-intent/examples/*.md
+
+      - name: Plugin and marketplace versions match
+        run: |
+          python - <<'EOF'
+          import json, sys
+          m = json.load(open(".claude-plugin/marketplace.json"))
+          p = json.load(open("plugins/sdlc/.claude-plugin/plugin.json"))
+          json.load(open("plugins/sdlc/hooks/hooks.json"))
+          entry = next(x for x in m["plugins"] if x["name"] == p["name"])
+          if entry["version"] != p["version"]:
+              sys.exit(f"marketplace.json has {entry['version']}, plugin.json has {p['version']}")
+          print(f"{p['name']} {p['version']}")
+          EOF
+
+      - name: Hook launcher parses
+        run: bash -n plugins/sdlc/hooks/run-python.sh
+
+  plugin-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate marketplace and plugin
+        run: |
+          claude plugin validate .
+          claude plugin validate plugins/sdlc

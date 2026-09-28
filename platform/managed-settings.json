@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.azure/**)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.kube/**)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.npmrc)",
+      "Read(~/.netrc)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)"
+    ]
+  },
+  "strictKnownMarketplaces": [
+    { "source": "github", "repo": "bala-chimera/sdlc-marketplace" }
+  ],
+  "extraKnownMarketplaces": {
+    "chimera-sdlc": {
+      "source": { "source": "github", "repo": "bala-chimera/sdlc-marketplace" }
+    }
+  },
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.<your-org>.internal:4317"
+  }
+}

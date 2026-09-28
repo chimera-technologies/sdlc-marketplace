@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI-native SDLC architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EDF1F4; --surface:#FFFFFF; --ink:#14212C; --sub:#55626E; --line:#C8D1D9; --soft:#DDE4EA;
+  --human:#B45309; --human-bg:#FCEFD9;
+  --auto:#1D5FA8; --auto-bg:#DCE9F7;
+  --node:#FFFFFF; --node-on:#14212C; --node-on-tx:#FFFFFF;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:"Schibsted Grotesk",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#10171D; --surface:#18222B; --ink:#E4EAEF; --sub:#98A6B2; --line:#2E3C48; --soft:#22303B;
+    --human:#F0A35A; --human-bg:#3A2710;
+    --auto:#7FB2EA; --auto-bg:#15304D;
+    --node:#18222B; --node-on:#E4EAEF; --node-on-tx:#10171D;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10171D; --surface:#18222B; --ink:#E4EAEF; --sub:#98A6B2; --line:#2E3C48; --soft:#22303B;
+  --human:#F0A35A; --human-bg:#3A2710;
+  --auto:#7FB2EA; --auto-bg:#15304D;
+  --node:#18222B; --node-on:#E4EAEF; --node-on-tx:#10171D;
+}
+*,*::before,*::after{box-sizing:inherit;}
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:1180px;margin:0 auto;padding:32px 20px 56px;}
+code,.mono{font-family:var(--mono);font-size:.86em;}
+code{background:var(--soft);padding:1px 5px;border-radius:4px;}
+h1{font-size:clamp(26px,4vw,40px);line-height:1.1;font-weight:700;letter-spacing:-.02em;margin:0 0 10px;max-width:22ch;}
+h2{font-size:21px;font-weight:600;letter-spacing:-.01em;margin:0 0 6px;}
+h3{font-size:16px;font-weight:600;margin:0 0 6px;}
+p{margin:0 0 10px;}
+.lede{color:var(--sub);max-width:68ch;margin-bottom:24px;}
+section{margin-top:52px;}
+.secintro{color:var(--sub);max-width:70ch;margin-bottom:18px;}
+
+/* Controls */
+.controls{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;background:var(--surface);}
+.seg button{font:inherit;font-size:14px;font-weight:500;border:0;background:transparent;color:var(--sub);padding:7px 16px;border-radius:999px;cursor:pointer;}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);}
+.key{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--sub);}
+.key span{display:inline-flex;align-items:center;gap:7px;}
+.dia{width:10px;height:10px;transform:rotate(45deg);display:inline-block;}
+.dia.h{background:var(--human);} .dia.a{background:var(--auto);}
+
+/* Loop + detail layout */
+.stage-area{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:20px;align-items:start;}
+@media (max-width:960px){.stage-area{grid-template-columns:1fr;}}
+.loop{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:8px;}
+.loop svg{display:block;width:100%;height:auto;}
+.node{cursor:pointer;}
+.node circle{fill:var(--node);stroke:var(--ink);stroke-width:1.5;transition:fill .15s;}
+.node .n{font-family:var(--mono);font-size:12px;fill:var(--sub);}
+.node .t{font-family:var(--sans);font-size:17px;font-weight:600;fill:var(--ink);}
+.node[aria-pressed="true"] circle{fill:var(--node-on);}
+.node[aria-pressed="true"] .t,.node[aria-pressed="true"] .n{fill:var(--node-on-tx);}
+.node:focus{outline:none;}
+.node:focus-visible circle{stroke:var(--auto);stroke-width:4;}
+.edge{fill:none;stroke:var(--ink);stroke-width:1.6;}
+.edge.inner{stroke:var(--sub);stroke-dasharray:5 5;}
+.elabel .art{font-family:var(--mono);font-size:12.5px;fill:var(--ink);font-weight:500;}
+.elabel .gate{font-family:var(--sans);font-size:12px;fill:var(--sub);}
+.center .c1{font-family:var(--sans);font-size:14px;font-weight:600;fill:var(--ink);}
+.center .c2{font-family:var(--sans);font-size:12.5px;fill:var(--sub);}
+
+.tabs{display:none;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
+.tabs button{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:6px 11px;cursor:pointer;}
+.tabs button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink);}
+@media (max-width:640px){.loop{display:none;}.tabs{display:flex;}}
+
+.detail{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px 22px 18px;}
+.detail .head{display:flex;align-items:baseline;gap:12px;margin-bottom:4px;}
+.detail .head .num{font-family:var(--mono);color:var(--sub);font-size:14px;}
+.detail .head h2{margin:0;font-size:26px;}
+.detail .summary{color:var(--sub);margin-bottom:14px;}
+.dl{display:grid;grid-template-columns:128px 1fr;gap:10px 16px;border-top:1px solid var(--line);padding-top:14px;}
+@media (max-width:480px){.dl{grid-template-columns:1fr;gap:2px 0;}.dl dd{margin-bottom:10px;}}
+.dl dt{font-size:13px;color:var(--sub);font-weight:500;}
+.dl dd{margin:0;font-size:14.5px;}
+.chips{display:flex;flex-wrap:wrap;gap:6px;}
+.chip{font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-radius:6px;padding:2px 7px;background:var(--bg);}
+.gatebox{border-radius:10px;padding:10px 12px;font-size:14.5px;}
+.gatebox.h{background:var(--human-bg);border-left:3px solid var(--human);}
+.gatebox.a{background:var(--auto-bg);border-left:3px solid var(--auto);}
+.gatebox b{font-weight:600;}
+.note{font-size:13.5px;color:var(--sub);border-top:1px dashed var(--line);margin-top:14px;padding-top:10px;}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;}
+@media (max-width:480px){.metrics{grid-template-columns:1fr;}}
+.metric{background:var(--bg);border-radius:10px;padding:10px 12px;font-size:13.5px;}
+.metric .k{font-weight:600;font-size:13px;margin-bottom:2px;}
+
+/* Lanes */
+.lanes{display:grid;gap:12px;}
+.lane{display:grid;grid-template-columns:220px 1fr;gap:18px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;}
+@media (max-width:760px){.lane{grid-template-columns:1fr;gap:8px;}}
+.lane .who{font-size:13px;color:var(--sub);}
+.lane ul{margin:6px 0 0;padding-left:18px;}
+.lane li{margin-bottom:5px;font-size:14.5px;}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 10px;}
+.flow .box{border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:13.5px;background:var(--bg);}
+.flow .box.gate{border-color:var(--auto);background:var(--auto-bg);font-weight:600;}
+.flow .arr{color:var(--sub);font-size:13px;}
+
+/* Table */
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px;}
+th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top;}
+th{font-weight:600;font-size:13px;color:var(--sub);background:var(--bg);}
+tr:last-child td{border-bottom:0;}
+td .tag{display:inline-block;font-size:12px;font-weight:600;padding:1px 7px;border-radius:5px;margin-right:4px;}
+.tag.h{background:var(--human-bg);color:var(--human);}
+.tag.a{background:var(--auto-bg);color:var(--auto);}
+
+/* Roadmap */
+.waves{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;}
+@media (max-width:900px){.waves{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media (max-width:520px){.waves{grid-template-columns:1fr;}}
+.wave{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;}
+.wave .wn{font-family:var(--mono);font-size:12px;color:var(--sub);}
+.wave h3{margin-top:2px;}
+.play{border-top:1px solid var(--line);padding:8px 0 4px;font-size:14px;}
+.play:first-of-type{border-top:0;}
+.play .pre{display:block;font-size:12.5px;color:var(--sub);}
+.maturity{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:14px;}
+@media (max-width:700px){.maturity{grid-template-columns:1fr;}}
+.mat{border:1px dashed var(--line);border-radius:12px;padding:12px 14px;font-size:14px;}
+.mat b{display:block;margin-bottom:2px;}
+
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media (max-width:760px){.two{grid-template-columns:1fr;}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;}
+.panel ol{margin:6px 0 0;padding-left:20px;}
+.panel li{margin-bottom:6px;font-size:14.5px;}
+.foot{margin-top:40px;font-size:13px;color:var(--sub);}
+.foot a{color:inherit;}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>AI-native SDLC: one loop, six stages, one audit trail</h1>
+  <p class="lede">Every stage commits an artifact that the next stage reads. Humans approve at the gates between stages rather than inside every step, and production signals feed new work back in without anyone having to start it. Select a stage to see how it runs.</p>
+</header>
+
+<div class="controls">
+  <div class="seg" role="group" aria-label="Operating mode">
+    <button type="button" data-mode="human" aria-pressed="true">Human-led path</button>
+    <button type="button" data-mode="headless" aria-pressed="false">Headless loop</button>
+  </div>
+  <div class="key">
+    <span><i class="dia h"></i>Named human approval</span>
+    <span><i class="dia a"></i>Deterministic check or confidence gate</span>
+  </div>
+</div>
+
+<div class="stage-area">
+  <div class="loop"><svg id="loop" viewBox="-95 30 950 560" role="group" aria-label="The six stages arranged as a loop"></svg></div>
+  <div>
+    <div class="tabs" id="tabs" role="group" aria-label="Stages"></div>
+    <article class="detail" id="detail" aria-live="polite"></article>
+  </div>
+</div>
+
+<section>
+  <h2>Stage boundaries</h2>
+  <p class="secintro">What crosses each boundary, what fires it in each mode, and who decides. In headless mode triggers replace people starting each stage, and confidence gates screen each artifact before it reaches its approver. Every approval gate stays human in both modes.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Boundary</th><th>Artifact that crosses</th><th>Human-led trigger</th><th>Headless trigger</th><th>Who decides</th></tr></thead>
+      <tbody>
+        <tr><td>Plan → Design</td><td><code>intent.md</code></td><td>Product owner merges the intent PR</td><td>Job on <code>paths: ['intent/**']</code> fires on merge</td><td><span class="tag h">Human</span>Product owner</td></tr>
+        <tr><td>Design → Build</td><td><code>spec.md</code></td><td>Engineer opens Claude Code in plan mode with the accepted spec</td><td>Merge of intent fires a job that opens spec.md as a PR, pre-screened by an adversarial reviewer; the accepted spec starts an auto-mode session once the engineer accepts the plan</td><td><span class="tag a">Screen</span>Adversarial review flags concerns<br><span class="tag h">Human</span>Product owner approves, tech lead for higher risk</td></tr>
+        <tr><td>Build ⇄ Test</td><td><code>plan.md</code>, diff, tests</td><td colspan="2">Inner loop inside the session: build, test, lint and screenshot checks run until green, then a verifier subagent checks with fresh context</td><td><span class="tag a">Gate</span>Hooks and the feedback loop</td></tr>
+        <tr><td>Test → Deploy</td><td>PR with check-run evidence</td><td colspan="2">PR opened or updated fires the managed Code Review or <code>claude-code-action</code>, plus standard CI</td><td><span class="tag a">Gate</span>Green checks and review passes</td></tr>
+        <tr><td>Deploy → Maintain</td><td>Merged PR, release record</td><td colspan="2">Merge fires the pipeline. Claude prepares the release; production waits for a named authorization</td><td><span class="tag h">Human</span>Code owner via branch protection, release manager for production</td></tr>
+        <tr><td>Maintain → Plan</td><td>New <code>intent.md</code></td><td>Claude Tag in a channel or ticket</td><td>Control-band breach, scheduled scan, webhook</td><td><span class="tag h">Human</span>Service owner triages; product-facing work goes to the product owner</td></tr>
+        <tr><td>Maintain → Deploy</td><td>Fix PR or rollback runbook</td><td>Claude Tag proposes a bounded fix</td><td>3σ breach or validated scan finding</td><td><span class="tag h">Human</span>Same review gate as any PR; runbooks approved in advance</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Cross-cutting layers</h2>
+  <p class="secintro">These run underneath every stage. They are why the loop can move faster without the controls falling behind.</p>
+  <div class="lanes">
+    <div class="lane">
+      <div><h3>Agent configuration</h3><div class="who">Owned by platform and tech leads, changed through PRs and regression-tested like code</div></div>
+      <div>
+        <div class="flow">
+          <span class="box">CLAUDE.md</span><span class="box">Skills</span><span class="box">Hooks</span><span class="box">REVIEW.md</span><span class="box">Subagents</span>
+          <span class="arr">gated by</span><span class="box gate">Eval suite</span>
+        </div>
+        <ul>
+          <li>The eval suite holds 20–50 real tasks with accepted outcomes. It runs on any PR touching <code>CLAUDE.md</code> or <code>.claude/**</code> and nightly; a drop in pass rate blocks the config change.</li>
+          <li>Feedback in: a mistake flagged twice in review goes into <code>CLAUDE.md</code>, and every incident or vulnerability class that ships a fix becomes a new eval.</li>
+          <li>Policy changes flow into skills and are signed off by the policy owner. Anything that must always hold is backed by a hook, because skills are advisory.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="lane">
+      <div><h3>Platform controls</h3><div class="who">Deployed by platform or IT through managed settings; engineers cannot override them</div></div>
+      <div>
+        <ul>
+          <li>Permission allow and deny lists, bypass mode disabled, managed rules only.</li>
+          <li>OS-level sandbox with a network domain allowlist and credential reads denied (<code>~/.ssh</code>, cloud keys, tokens).</li>
+          <li>Managed hooks only, a managed MCP allowlist, and an approved plugin marketplace as the only source of skills, agents and hooks.</li>
+          <li>A minimum Claude Code version, and CI runners that hold short-lived scoped tokens with no standing production credentials.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="lane">
+      <div><h3>Evidence and measurement</h3><div class="who">Where the audit trail and the stage metrics come from</div></div>
+      <div>
+        <ul>
+          <li>Git history for every artifact: author, timestamp, approver. The chain of commits is the audit record.</li>
+          <li>OpenTelemetry export for sessions, skill invocations and every hook allow or block decision.</li>
+          <li>PR metadata, CI logs, the incident tracker and scan history feed the leading and lagging indicators shown on each stage, plus DORA measures.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="lane">
+      <div><h3>Systems of record</h3><div class="who">Name one source of truth per artifact</div></div>
+      <div>
+        <ul>
+          <li><b>Repo first:</b> markdown artifacts are authoritative and Jira or ServiceNow link to the commits.</li>
+          <li><b>Legacy first:</b> the existing tool holds the record; Claude reads it at session start and writes the outcome back through MCP.</li>
+          <li><b>Linkage as the minimum:</b> each artifact names its record ID and each record holds the commit SHA. A good starting point, with two sources of truth accepted.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Adoption roadmap</h2>
+  <p class="secintro">The loop is the end state, not the starting point. Adopt plays in the order their prerequisites allow, and automate each handoff only once it works by hand.</p>
+  <div class="waves">
+    <div class="wave"><div class="wn">Wave 1</div><h3>No prerequisites</h3>
+      <div class="play">Capture as <code>intent.md</code><span class="pre">Template skill and an intent home</span></div>
+      <div class="play"><code>CLAUDE.md</code><span class="pre">One engineer who knows the repo</span></div>
+      <div class="play">Skills as institutional knowledge<span class="pre">One policy with a named owner</span></div>
+      <div class="play">Feedback loop<span class="pre">One-command build and test</span></div>
+      <div class="play">Hooks as approval gates<span class="pre">A written list of required approvals</span></div>
+    </div>
+    <div class="wave"><div class="wn">Wave 2</div><h3>Builds on wave 1</h3>
+      <div class="play">Requirements and design<span class="pre">Needs intent and policy skills</span></div>
+      <div class="play">Plan mode default<span class="pre">Needs intent or spec; CLAUDE.md helps</span></div>
+      <div class="play">Parallel sessions and subagents<span class="pre">Needs CLAUDE.md; feedback loop helps</span></div>
+      <div class="play">PR review loop<span class="pre">Needs CLAUDE.md; skills for policy passes</span></div>
+    </div>
+    <div class="wave"><div class="wn">Wave 3</div><h3>Automate the pipeline</h3>
+      <div class="play">Continuous evals<span class="pre">Needs CLAUDE.md and feedback loop</span></div>
+      <div class="play">CI/CD integration<span class="pre">Needs PR review and approval hooks</span></div>
+      <div class="play">Auto mode for routine work<span class="pre">Needs tuned guardrails and tests</span></div>
+    </div>
+    <div class="wave"><div class="wn">Wave 4</div><h3>Close the loop</h3>
+      <div class="play">Control bands<span class="pre">Needs intent, PR review, hooks, rehearsed rollback</span></div>
+      <div class="play">Recurring security scans<span class="pre">Needs PR review, hooks, intent format</span></div>
+      <div class="play">Claude Tag on call<span class="pre">Needs the review gate and intent format</span></div>
+    </div>
+  </div>
+  <div class="maturity">
+    <div class="mat"><b>1. Prompt by hand</b>Run each step interactively and refine the prompt and the skills.</div>
+    <div class="mat"><b>2. Codify</b>Turn the prompt into an organization-level slash command.</div>
+    <div class="mat"><b>3. Trigger</b>A merge fires a non-interactive job that opens the next artifact as a PR. The owner's first touch is the review.</div>
+  </div>
+</section>
+
+<section class="two">
+  <div class="panel">
+    <h3>Git mechanics</h3>
+    <ol>
+      <li>Each artifact is written on its own branch and opened as a PR into the protected branch.</li>
+      <li>The owner's merge is the sign-off, timestamped in git history.</li>
+      <li>CI path filters react to the folder touched and start the next job headless.</li>
+      <li>That job opens its own branch and PR for the next artifact, so the next reviewer is notified.</li>
+    </ol>
+    <p class="note">One repo with an <code>intent/</code> folder is the simplest setup. Use a dedicated intent repo only when intents span many repositories.</p>
+  </div>
+  <div class="panel">
+    <h3>Two limits worth stating on the diagram</h3>
+    <ol>
+      <li>A <code>PreToolUse</code> hook gates Claude's own tool calls. A deploy step that CI runs without Claude also needs environment protection rules in the CI platform.</li>
+      <li>The agent that wrote a change can never approve it. Branch protection and the production gate stay human in every mode.</li>
+    </ol>
+  </div>
+</section>
+
+<p class="foot">Based on <a href="https://claude.com/blog/the-ai-native-sdlc-playbook">The AI-Native SDLC playbook</a>.</p>
+</div>
+
+<script>
+const stages=[
+ {n:1,name:'Plan',summary:'Intent is captured once, in the originator’s own words, as a version-controlled file the next stage can act on.',
+  entry:'A person’s idea (brainstormed in claude.ai or Cowork), a filed ticket, or a finding from Maintain.',
+  claude:'Asks the questions an analyst would ask (scope, users, constraints, success) and writes the result from the organization’s template.',
+  config:['intent.md template skill','GitHub connector'],
+  artifact:'<code>intent.md</code>: problem, proposed outcome, affected users and systems, constraints, open questions. Non-engineers commit through the connector.',
+  gate:{human:['h','<b>Product owner</b> reviews and corrects the draft, then accepts it by merging or rejects it by closing the review.'],
+        headless:['h','Intents written by Maintain, Claude Tag or Claude Security land as PRs. The <b>service owner</b> triages; product-facing work goes to the product owner.']},
+  evidence:'Author, timestamp and revision history in git.',
+  lead:'Time from first conversation to committed intent.md (weeks to hours).',
+  lag:'Share of intents accepted into Design; intent edits after the first spec.md.'},
+ {n:2,name:'Design',summary:'Requirements and design collapse into one session, with policy applied while the spec is written.',
+  entry:'Merge of intent.md. Run by hand first, then as a slash command, then as a job that fires on merge.',
+  claude:'Produces one requirements and design spec from the intent, applying policy skills and flagging concerns and conflicting policies. For front-end work the product owner mocks in Claude Design and exports to Claude Code.',
+  config:['brand skill','security skill','compliance skill','UX skill','Claude Design'],
+  artifact:'<code>spec.md</code> committed alongside intent.md as a PR, with the prompt and skill versions logged.',
+  gate:{human:['h','<b>Product owner</b> checks the spec against the intent and resolves each flag with its named policy owner. Higher-risk changes go to a <b>tech lead</b>. Acceptance starts Build.'],
+        headless:['h','A job opens <code>spec.md</code> as a PR and an <b>adversarial reviewing agent</b> pre-screens it against the intent and policy, flagging concerns. The <b>product owner</b> still reviews and approves it, with a <b>tech lead</b> for higher risk. A human always decides whether a spec moves to Build.']},
+  evidence:'Spec, prompt and skill versions in version control; flag resolutions in the PR.',
+  lead:'Time between the intent.md and spec.md commits for the same change.',
+  lag:'spec.md commits dated after the first plan.md (requirements rework).'},
+ {n:3,name:'Build',summary:'Nothing is implemented without an accepted plan. Guardrails run as code rather than habits.',
+  entry:'Accepted spec.md. Plan mode is the default; auto mode becomes the default for routine work once guardrails mature.',
+  claude:'Reads the codebase without changing it, writes a plan (files, order, tests, risks), then implements, often in one pass. Parallel sessions run in separate worktrees; subagents handle verification, simplification and research.',
+  config:['CLAUDE.md','skills','build-time hooks','.claude/agents/','worktrees'],
+  artifact:'<code>plan.md</code>, the diff and its tests. When implementation departs from the plan, plan.md changes in the same commit (a hook can enforce this).',
+  gate:{human:['h','<b>Engineer</b> accepts the plan; Claude cannot edit files until then. Higher-risk changes go to a <b>tech lead or architect</b>.'],
+        headless:['h','The <b>engineer</b> still accepts the plan. Auto mode then applies the edits without a prompt for each one, for routine work with a small blast radius and covered code. A verifier or reviewing agent checks the result; anything higher risk goes to a <b>tech lead</b>.']},
+  evidence:'Plan revisions and who accepted them; session traces attributed to the engineer who ran them.',
+  lead:'Share of changes merged from the first pass; time from plan approval to merge.',
+  lag:'Rework cycles per change; how often the merged diff still matches plan.md.'},
+ {n:4,name:'Test',summary:'Verification runs inside the Build session, not after it. What reaches a human has already passed.',
+  entry:'Every iteration of the Build session.',
+  claude:'Runs one-command build, test and lint; compares screenshots for UI work; writes the failing test first for bug fixes; iterates until green. A verifier subagent does a fresh-context final check.',
+  config:['CLAUDE.md verification block','test-file protection hook','browser or screenshot MCP'],
+  artifact:'Literal toolchain output pasted into the session and attached to the PR check run.',
+  gate:{human:['a','No human inside the loop. <b>Hooks</b> guarantee verification before a task is reported done and block edits to test files during a fix.'],
+        headless:['a','Same. The evidence reaches the code owner at Deploy, who can then judge intent and risk instead of re-running checks.']},
+  evidence:'Session transcript through the OpenTelemetry export, and the PR check run.',
+  lead:'First-pass CI success rate for agent-written changes.',
+  lag:'Review time per PR; change failure rate.',
+  note:'Evals are not part of this per-change loop. They regression-test the agent’s configuration and live in the configuration layer below.'},
+ {n:5,name:'Deploy',summary:'Review runs in both directions, and the agent does everything up to the production gate and nothing past it.',
+  entry:'A PR opened or updated.',
+  claude:'Runs bugs, security and compliance passes against spec.md and plan.md; addresses @claude comments and babysits its own PRs to green; triages failed builds and drafts changelogs in CI; deploys and rolls back through MCP tools scoped per environment.',
+  config:['REVIEW.md','approval hooks','claude-code-action','deploy MCP tools','sandboxed runners'],
+  artifact:'PR with review findings, fixes and approvals; the release record.',
+  gate:{human:['h','<b>Code owner</b> approves through branch protection; the authoring agent cannot. <b>Release manager</b> authorizes production. Development deploys freely and staging sits in between.'],
+        headless:['h','Unchanged. These gates are never automated. Severity counts from the review can additionally block a merge.']},
+  evidence:'PR history as the audit record; hook decisions with timestamps; agent and engineer identities separated in pipeline logs.',
+  lead:'Time to first review; comments resolved without a human touching the branch.',
+  lag:'Defects caught before merge versus escaped; DORA measures.',
+  note:'Rollback is the most rehearsed path: one command, exercised regularly in staging, because Maintain calls it.'},
+ {n:6,name:'Maintain',summary:'The loop closes. Deterministic triggers invoke Claude without a person in the invocation path.',
+  entry:'Control-band breach, a scheduled Claude Security scan, or a Slack or ticket mention through Claude Tag.',
+  claude:'At 1σ the script only logs. At 2σ Claude diagnoses read-only. At 3σ it may open a PR into the review gate or trigger a pre-approved runbook such as rollback. In channels it responds as first responder and writes the post-mortem to a lessons file.',
+  config:['bands.yaml','detection script (no model)','Claude Security','Claude Tag'],
+  artifact:'Incident record. A bounded fix becomes a PR into Deploy; anything larger becomes a new <code>intent.md</code> into Plan. Once fixed, the incident becomes an eval.',
+  gate:{human:['h','<b>Service owner or on-call</b> triages the queue: fix now, schedule, or dismiss with a reason. Dismissals tune the bands.'],
+        headless:['h','Same triage. Tier boundaries come from version-controlled config and runbooks are approved in advance.']},
+  evidence:'Breach timestamps and tiers from the detection log; findings with confidence ratings; dismissals with reasons.',
+  lead:'Time from breach to intent.md in the triage queue.',
+  lag:'Share of findings that become merged fixes; repeat incidents of the same class.'}
+];
+const edges=[
+ {f:1,t:2,art:'intent.md',g:{human:['h','Product owner merges'],headless:['h','Owner triages']}},
+ {f:2,t:3,art:'spec.md',g:{human:['h','Product owner accepts'],headless:['h','Pre-screened, PO approves']}},
+ {f:3,t:4,art:'diff + tests',g:{human:['a','Hooks, feedback loop'],headless:['a','Hooks, feedback loop']}},
+ {f:4,t:5,art:'PR + evidence',g:{human:['a','Green checks'],headless:['a','Green checks']}},
+ {f:5,t:6,art:'merged, released',g:{human:['h','Code owner, release mgr'],headless:['h','Code owner, release mgr']}},
+ {f:6,t:1,art:'intent.md',g:{human:['h','Service owner triages'],headless:['h','Service owner triages']}}
+];
+const pos={1:[380,86],2:[610,196],3:[610,414],4:[380,524],5:[150,414],6:[150,196]};
+const C=[380,305], R=50;
+let mode='human', sel=1;
+const NS='http://www.w3.org/2000/svg';
+const svg=document.getElementById('loop');
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;}
+function unit(x,y){const l=Math.hypot(x,y)||1;return[x/l,y/l];}
+function trim(a,ctrl,r){const [ux,uy]=unit(ctrl[0]-a[0],ctrl[1]-a[1]);return[a[0]+ux*r,a[1]+uy*r];}
+
+function draw(){
+  svg.innerHTML='';
+  const defs=el('defs',{},svg);
+  const m=el('marker',{id:'ah',viewBox:'0 0 10 10',refX:'8',refY:'5',markerWidth:'7',markerHeight:'7',orient:'auto-start-reverse'},defs);
+  el('path',{d:'M0,0 L10,5 L0,10 z',fill:'currentColor',style:'fill:var(--ink)'},m);
+  const m2=el('marker',{id:'ah2',viewBox:'0 0 10 10',refX:'8',refY:'5',markerWidth:'7',markerHeight:'7',orient:'auto-start-reverse'},defs);
+  el('path',{d:'M0,0 L10,5 L0,10 z',style:'fill:var(--sub)'},m2);
+
+  // ring edges
+  edges.forEach(e=>{
+    const A=pos[e.f],B=pos[e.t];
+    const M=[(A[0]+B[0])/2,(A[1]+B[1])/2];
+    const [dx,dy]=unit(M[0]-C[0],M[1]-C[1]);
+    const ctrl=[M[0]+dx*58,M[1]+dy*58];
+    const s=trim(A,ctrl,R+2), t=trim(B,ctrl,R+8);
+    el('path',{class:'edge',d:`M${s[0]},${s[1]} Q${ctrl[0]},${ctrl[1]} ${t[0]},${t[1]}`,'marker-end':'url(#ah)'},svg);
+    const apex=[M[0]+dx*29,M[1]+dy*29];
+    const [k,txt]=e.g[mode];
+    el('rect',{x:apex[0]-6,y:apex[1]-6,width:12,height:12,transform:`rotate(45 ${apex[0]} ${apex[1]})`,style:`fill:var(${k==='h'?'--human':'--auto'});stroke:var(--surface);stroke-width:2`},svg);
+    const L=[apex[0]+dx*22,apex[1]+dy*22];
+    const anchor=dx>0.35?'start':dx<-0.35?'end':'middle';
+    const oy=dy<-0.5?-14:dy>0.5?12:0;
+    const g=el('g',{class:'elabel'},svg);
+    const a=el('text',{x:L[0],y:L[1]+oy,'text-anchor':anchor,class:'art'},g);a.textContent=e.art;
+    const b=el('text',{x:L[0],y:L[1]+oy+16,'text-anchor':anchor,class:'gate'},g);b.textContent=txt;
+  });
+
+  // inner: Test -> Build iterate
+  inner(pos[4],pos[3],[500,420],'iterate until green',[462,412],'middle');
+  // inner: Maintain -> Deploy shortcut
+  inner(pos[6],pos[5],[262,305],'fix PR or',[236,300],'start','rollback runbook');
+
+  // centre
+  const c=el('g',{class:'center'},svg);
+  [['c1','Every stage commits',-26],['c1','an artifact the next',-8],['c1','stage reads.',10],['c2','The commit chain is',36],['c2','the audit trail.',52]]
+   .forEach(([cl,t,y])=>{const x=el('text',{x:C[0]+45,y:C[1]+y,'text-anchor':'middle',class:cl},c);x.textContent=t;});
+
+  // nodes
+  stages.forEach(s=>{
+    const [x,y]=pos[s.n];
+    const g=el('g',{class:'node',tabindex:'0',role:'button','aria-label':`Stage ${s.n}: ${s.name}`,'aria-pressed':String(s.n===sel)},svg);
+    el('circle',{cx:x,cy:y,r:R},g);
+    const n=el('text',{x,y:y-8,'text-anchor':'middle',class:'n'},g);n.textContent='0'+s.n;
+    const t=el('text',{x,y:y+13,'text-anchor':'middle',class:'t'},g);t.textContent=s.name;
+    g.addEventListener('click',()=>select(s.n));
+    g.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();select(s.n);}});
+  });
+}
+function inner(A,B,ctrl,label,lp,anchor,label2){
+  const s=trim(A,ctrl,R+2),t=trim(B,ctrl,R+8);
+  el('path',{class:'edge inner',d:`M${s[0]},${s[1]} Q${ctrl[0]},${ctrl[1]} ${t[0]},${t[1]}`,'marker-end':'url(#ah2)'},svg);
+  const g=el('g',{class:'elabel'},svg);
+  const a=el('text',{x:lp[0],y:lp[1],'text-anchor':anchor,class:'gate'},g);a.textContent=label;
+  if(label2){const b=el('text',{x:lp[0],y:lp[1]+15,'text-anchor':anchor,class:'gate'},g);b.textContent=label2;}
+}
+
+const tabs=document.getElementById('tabs');
+stages.forEach(s=>{const b=document.createElement('button');b.type='button';b.textContent=`${s.n} ${s.name}`;b.dataset.n=s.n;b.addEventListener('click',()=>select(s.n));tabs.appendChild(b);});
+
+function detail(){
+  const s=stages[sel-1];
+  const [k,g]=s.gate[mode];
+  const out=edges.filter(e=>e.f===s.n).map(e=>`<code>${e.art}</code> to ${stages[e.t-1].name}`);
+  if(s.n===6) out.push('fix PR or rollback runbook to Deploy');
+  if(s.n===3) out.length=0, out.push('<code>plan.md</code>, diff and tests into the Test loop');
+  document.getElementById('detail').innerHTML=`
+    <div class="head"><span class="num">0${s.n}</span><h2>${s.name}</h2></div>
+    <p class="summary">${s.summary}</p>
+    <dl class="dl">
+      <dt>Starts when</dt><dd>${s.entry}</dd>
+      <dt>Claude does</dt><dd>${s.claude}</dd>
+      <dt>Configuration</dt><dd class="chips">${s.config.map(c=>`<span class="chip">${c}</span>`).join('')}</dd>
+      <dt>Commits</dt><dd>${s.artifact}</dd>
+      <dt>Gate</dt><dd><div class="gatebox ${k}">${g}</div></dd>
+      <dt>Hands off</dt><dd>${out.join('; ')}</dd>
+      <dt>Evidence</dt><dd>${s.evidence}</dd>
+    </dl>
+    <div class="metrics">
+      <div class="metric"><div class="k">Leading indicator</div>${s.lead}</div>
+      <div class="metric"><div class="k">Lagging indicator</div>${s.lag}</div>
+    </div>
+    ${s.note?`<p class="note">${s.note}</p>`:''}`;
+  tabs.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.n===sel)));
+}
+function select(n){sel=n;draw();detail();}
+document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',()=>{
+  mode=b.dataset.mode;
+  document.querySelectorAll('.seg button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+  draw();detail();
+}));
+draw();detail();
+</script>
+</body>
+</html>

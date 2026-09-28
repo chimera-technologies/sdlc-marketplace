@@ -1,0 +1,12 @@
+{
+  "metric": "p95_latency_ms",
+  "tier": 3,
+  "value": 2400,
+  "band": "<=800",
+  "window": "15m",
+  "service": "claims-core",
+  "breach_id": "BR-1",
+  "detected_at": "2026-09-27T14:05:00Z",
+  "runbook": "runbooks/claims-core-latency.md",
+  "dashboard": "https://grafana.example.com/d/claims-core"
+}

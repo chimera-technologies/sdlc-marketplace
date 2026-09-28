@@ -1,0 +1,62 @@
+name: Evals
+
+# Runs the real skills against evals/<skill>/cases and fails if the pass
+# rate falls below evals/<skill>/config.json min_pass_rate.
+#
+# POC: manual only (Actions -> Evals -> Run workflow), about $0.30 per case.
+# After the POC, restore the automatic triggers below and make
+# "Evals / write-intent" a required status check on main:
+#
+#   pull_request:
+#     paths: ['plugins/**', 'evals/**']
+#   schedule:
+#     - cron: '17 2 * * *'   # nightly, catches model drift
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model to evaluate"
+        default: claude-sonnet-5
+      case:
+        description: "Run only this case (folder name), or leave empty for all"
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  write-intent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Keep in step with MODEL in create-intent.yml.
+      EVAL_MODEL: ${{ inputs.model || 'claude-sonnet-5' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run evals
+        env:
+          CASE: ${{ inputs.case }}
+        run: python evals/run_evals.py --skill write-intent --report eval-report.json ${CASE:+--case "$CASE"}
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-write-intent
+          path: eval-report.json
+          retention-days: 90

@@ -1,0 +1,28 @@
+{
+  "description": "High-severity scan finding is high risk, goes to the service owner, and never copies the token or victim ID.",
+  "args": {
+    "source": "claude-security",
+    "record_id": "none",
+    "fingerprint": "cs-2026-0147"
+  },
+  "expect": {
+    "frontmatter": {
+      "source": "claude-security",
+      "risk": "high",
+      "fingerprint": "cs-2026-0147",
+      "owner": "@example-org/web-platform",
+      "owner_role": "service-owner"
+    },
+    "systems_include": [
+      "customer-portal"
+    ],
+    "author_contains": "Claude Security",
+    "body_contains": [
+      "CS-2026-0147"
+    ],
+    "body_not_contains": [
+      "eyJhbGciOiJIUzI1NiJ9",
+      "55123"
+    ]
+  }
+}

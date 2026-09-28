@@ -1,0 +1,23 @@
+# Who approves intents for each component. Read by the write-intent skill to
+# route an intent, and by validate_intent.py (--owners) to reject unknown
+# owners. Change it through a PR like any other config.
+#
+# product_owner: approves product-facing intents (behaviour, UX, wording)
+# service_owner: triages operational intents from Maintain, Claude Security,
+#                Claude Tag and technical tickets
+# jira_components: Jira component names that map to this component
+#
+# POC: no components yet (the Jira space is team-managed), so every intent
+# routes to default. When real teams join, add entries like:
+#
+#   components:
+#     customer-portal:
+#       product_owner: "@<po-handle>"
+#       service_owner: "@<org>/<team>"
+#       jira_components: ["Customer Portal"]
+
+default:
+  product_owner: "@bala-chimera"
+  service_owner: "@bala-chimera"
+
+components: {}

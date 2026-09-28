@@ -1,0 +1,27 @@
+{
+  "description": "A ticket too thin to state a problem is still written, prefixed [needs-info], with no invented facts.",
+  "args": {
+    "source": "jira",
+    "record_id": "CLM-777"
+  },
+  "expect": {
+    "frontmatter": {
+      "source": "jira",
+      "record_id": "CLM-777",
+      "owner": [
+        "@example-org/product-owners",
+        "@example-org/service-owners"
+      ]
+    },
+    "title_prefix": "[needs-info]",
+    "author_contains": "Sam Ortiz",
+    "section_contains_any": {
+      "Open questions": [
+        "owner",
+        "missing",
+        "unclear",
+        "confirm"
+      ]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+# Python caches from tests and evals
+__pycache__/
+*.pyc
+
+# Local eval output
+eval-report*.json
+
+# SDLC workflow scratch (headless run I/O)
+.sdlc-input/
+.sdlc-output/
+fm.json

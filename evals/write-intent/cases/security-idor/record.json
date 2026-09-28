@@ -1,0 +1,8 @@
+{
+  "finding_id": "CS-2026-0147",
+  "title": "Claim documents retrievable by ID without ownership check",
+  "severity": "high",
+  "confidence": 0.92,
+  "location": "customer-portal/src/api/documents.ts:88",
+  "description": "GET /api/claims/{claimId}/documents returns documents for any claimId once the caller is signed in. Reproduced with session token eyJhbGciOiJIUzI1NiJ9.eval-demo-token against claimId 55123, which belongs to another customer."
+}
