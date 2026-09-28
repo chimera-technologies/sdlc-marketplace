@@ -22,17 +22,18 @@ on:
   workflow_dispatch:
     inputs:
       source:
+        description: "source: where the intent comes from"
         type: choice
         options: [jira, maintain, claude-security, claude-tag]
         default: jira
       record_id:
-        description: "Jira key, e.g. CLM-123, or none"
+        description: "record_id: Jira key (e.g. CLM-123), or none"
         default: none
       fingerprint:
-        description: "Dedup key for non-Jira sources (lowercase, a-z0-9-)"
+        description: "fingerprint: dedup key for non-Jira sources (a-z, 0-9, -), e.g. p95-latency-claims-api"
         default: ""
       signal:
-        description: "Signal JSON for non-Jira sources"
+        description: "signal: JSON payload for non-Jira sources"
         default: "{}"
 
 permissions:
