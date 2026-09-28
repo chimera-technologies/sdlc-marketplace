@@ -130,6 +130,9 @@ jobs:
           # POC: Claude subscription token from `claude setup-token`. For shared or
           # production use, switch to anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Read-only workflow token (permissions: contents: read), so the action
+          # skips its OIDC token exchange and Claude never holds write access.
+          github_token: ${{ github.token }}
           prompt: >-
             /sdlc:write-intent mode=headless source=${{ env.SOURCE }}
             record_id=${{ env.RECORD_ID }} fingerprint=${{ env.FINGERPRINT || 'none' }}
