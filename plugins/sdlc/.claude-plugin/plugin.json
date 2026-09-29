@@ -1,7 +1,7 @@
 {
   "name": "sdlc",
   "displayName": "AI-native SDLC",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Skills, hooks and agents for the AI-native SDLC loop: Plan (write-intent), the security-policy skill, and guardrail hooks (headless write guard, intent validation). Design, Build, Test, Deploy and Maintain to follow.",
   "author": { "name": "bala-chimera (POC)" },
   "keywords": ["sdlc", "intent", "plan", "spec", "security", "policy"]

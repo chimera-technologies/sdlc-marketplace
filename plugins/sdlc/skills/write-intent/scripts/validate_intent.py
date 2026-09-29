@@ -46,6 +46,8 @@ OWNERS_LINE_RE = re.compile(
     r"""^\s*[A-Za-z_]+\s*:\s*["']?(@[A-Za-z0-9-]+(?:/[A-Za-z0-9._-]+)?)["']?\s*(?:#.*)?$"""
 )
 FINGERPRINT_RE = re.compile(r"^[a-z0-9-]{1,60}$")
+COMPONENT_RE = re.compile(r"^  ([a-z0-9][a-z0-9-]*)\s*:\s*(#.*)?$")
+UNKNOWN_SYSTEM = "unknown"  # documented value when no owners.yaml component matches
 PLACEHOLDER_RE = re.compile(r"<[^<>\n]{2,}>")
 FILLER_RE = re.compile(r"\b(TBD|TODO|FIXME|lorem ipsum)\b", re.IGNORECASE)
 MAX_WORDS = 700  # "under one page"
@@ -99,7 +101,22 @@ def load_owners(path):
     return owners
 
 
-def validate(path, owners=None):
+def load_components(path):
+    """Component names (keys under `components:`) in the owners file."""
+    names, inside = set(), False
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if re.match(r"^components\s*:", line):
+            inside = True
+            continue
+        if inside and re.match(r"^\S", line):
+            break
+        m = COMPONENT_RE.match(line) if inside else None
+        if m:
+            names.add(m.group(1))
+    return names
+
+
+def validate(path, owners=None, components=None):
     errors, warnings = [], []
     text = Path(path).read_text(encoding="utf-8")
     fm, body = parse_frontmatter(text)
@@ -144,6 +161,13 @@ def validate(path, owners=None):
             errors.append("frontmatter: created must be YYYY-MM-DD")
     if "systems" in fm and not isinstance(fm["systems"], list):
         errors.append("frontmatter: systems must be a list, e.g. [claims-core, portal]")
+    elif components is not None and isinstance(fm.get("systems"), list):
+        for name in fm["systems"]:
+            if name != UNKNOWN_SYSTEM and name not in components:
+                warnings.append(
+                    f"system {name!r} is not a component in the owners file; use a listed "
+                    f"component or '{UNKNOWN_SYSTEM}' (and ask who owns it under Open questions)"
+                )
 
     if not re.search(r"^# Intent: \S", body, re.MULTILINE):
         errors.append("missing H1 '# Intent: <title>'")
@@ -188,9 +212,10 @@ def main():
     args = ap.parse_args()
 
     owners = load_owners(args.owners) if args.owners else None
+    components = load_components(args.owners) if args.owners else None
     failed, out = False, {}
     for f in args.files:
-        fm, errors, warnings = validate(f, owners)
+        fm, errors, warnings = validate(f, owners, components)
         out[f] = fm
         for w in warnings:
             print(f"::warning file={f}::{w}", file=sys.stderr)

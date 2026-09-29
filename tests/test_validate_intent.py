@@ -149,6 +149,25 @@ class ValidateIntentTest(unittest.TestCase):
         _, errors, _ = vi.validate(SKILL / "templates" / "intent.md")
         self.assertError(errors, "unfilled template placeholder")
 
+    def test_load_components(self):
+        self.assertEqual(vi.load_components(OWNERS), {"claims-core", "customer-portal"})
+        path = Path(self.tmp.name) / "owners.yaml"
+        path.write_text('default:\n  product_owner: "@a"\n\ncomponents: {}\n', encoding="utf-8")
+        self.assertEqual(vi.load_components(path), set())
+
+    def test_unlisted_system_warns_not_errors(self):
+        path = Path(self.tmp.name) / "claims-status-self-service.md"
+        path.write_text(self.example.replace("[claims-core, customer-portal]", "[claims-core, to-do-list]"), encoding="utf-8")
+        _, errors, warnings = vi.validate(path, self.owners, vi.load_components(OWNERS))
+        self.assertEqual(errors, [])
+        self.assertTrue(any("'to-do-list' is not a component" in w for w in warnings), warnings)
+
+    def test_unknown_system_is_allowed(self):
+        path = Path(self.tmp.name) / "claims-status-self-service.md"
+        path.write_text(self.example.replace("[claims-core, customer-portal]", "[unknown]"), encoding="utf-8")
+        _, errors, warnings = vi.validate(path, self.owners, set())
+        self.assertEqual((errors, warnings), ([], []))
+
     def test_load_owners(self):
         path = Path(self.tmp.name) / "owners.yaml"
         path.write_text(

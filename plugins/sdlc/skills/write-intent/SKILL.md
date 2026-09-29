@@ -120,7 +120,7 @@ Downstream workflows parse these fields, so they are not optional:
 | `source` | `human`, `jira`, `maintain`, `claude-security`, `claude-tag`. |
 | `record_id` | Jira key, or `none`. Required when source is `jira`. With no ticket (a document or a conversation), Step 5 offers to create an Epic and fills this in. |
 | `fingerprint` | Dedup key passed in by headless workflows, or `none`. |
-| `systems` | Component names as listed in `.sdlc/owners.yaml`. |
+| `systems` | Component names as listed under `components` in `.sdlc/owners.yaml`. If none matches, use `[unknown]` and ask who owns it under Open questions. Never invent a component name; the validator warns on names it doesn't know. |
 | `owner`, `owner_role` | See routing below. Quote the value (`owner: "@org/team"`), because YAML cannot start an unquoted value with `@`. |
 | `risk` | See rubric below. The owner may change it in review. |
 | `created` | Today, `YYYY-MM-DD`. |

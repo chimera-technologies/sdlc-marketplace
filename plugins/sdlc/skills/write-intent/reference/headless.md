@@ -65,7 +65,8 @@ ignored: ...".
 - `fields.description` becomes Problem, Outcome, Constraints, and so on.
 - `fields.reporter.displayName` becomes the author.
 - `fields.components[].name` maps to `systems` (match the names in
-  owners.yaml `jira_components`).
+  owners.yaml `jira_components`). No match, or no components on the
+  ticket: `systems: [unknown]`, plus an Open question asking who owns it.
 - `fields.issuetype.name` and `fields.labels` help decide product-facing
   versus operational.
 - `fields.priority.name` informs risk but never lowers it below the rubric.
