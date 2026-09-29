@@ -73,7 +73,7 @@ jobs:
             echo "- \`$f\` -> $rid: $created created, $existing already existed" >> "$GITHUB_STEP_SUMMARY"
             if [ "$created" -gt 0 ]; then
               list=$(jq -r '.created[] | "- \(.key) \(.summary)"' "$RUNNER_TEMP/result.json")
-              msg=$(printf 'Stories created from %s (%s):\n%s' "$f" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$AFTER/$f" "$list")
+              msg=$(printf 'Stories created from %s:\n%s\n\nSpec: %s' "$f" "$list" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$AFTER/$f")
               jq -n --arg b "$msg" '{body:$b}' | curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
                 -H "Content-Type: application/json" -X POST --data @- \
                 "$JIRA_BASE_URL/rest/api/2/issue/$rid/comment" >/dev/null
