@@ -128,6 +128,13 @@ class ValidateIntentTest(unittest.TestCase):
         _, errors, _ = self.check(self.example.replace("claims-core API, customer portal", "<e.g. claims-core API>"))
         self.assertError(errors, "unfilled template placeholder")
 
+    def test_html_inside_code_is_not_a_placeholder(self):
+        text = self.example.replace(
+            "- Customers must only ever see their own claims",
+            "- Render with `<label>` and\n```html\n<noscript>Enable JS</noscript>\n```\n- Customers must only ever see their own claims")
+        _, errors, _ = self.check(text)
+        self.assertEqual(errors, [])
+
     def test_filler_in_required_section(self):
         _, errors, _ = self.check(self.example.replace("A customer can see", "TBD. A customer can see"))
         self.assertError(errors, "contains filler")

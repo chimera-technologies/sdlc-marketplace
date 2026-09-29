@@ -140,8 +140,8 @@ def validate(path, owners=None, root="."):
         detail = ([f"missing {missing}"] if missing else []) + ([f"unexpected {extra}"] if extra else [])
         errors.append(f"section headings must be exactly {SECTIONS} ({'; '.join(detail) or 'wrong order'})")
 
-    for m in vi.PLACEHOLDER_RE.finditer(text):
-        errors.append(f"unfilled template placeholder: {m.group(0)[:60]}")
+    for ph in vi.placeholders(text):
+        errors.append(f"unfilled template placeholder: {ph[:60]}")
     for name in MUST_BE_REAL:
         content = sections.get(name, "")
         if not content:

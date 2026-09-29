@@ -49,6 +49,13 @@ FINGERPRINT_RE = re.compile(r"^[a-z0-9-]{1,60}$")
 COMPONENT_RE = re.compile(r"^  ([a-z0-9][a-z0-9-]*)\s*:\s*(#.*)?$")
 UNKNOWN_SYSTEM = "unknown"  # documented value when no owners.yaml component matches
 PLACEHOLDER_RE = re.compile(r"<[^<>\n]{2,}>")
+CODE_RE = re.compile(r"```.*?```|`[^`\n]+`", re.DOTALL)  # fenced blocks and inline code
+
+
+def placeholders(text):
+    """Template placeholders like <short title>, ignoring anything inside code
+    (so `<label>` or an HTML snippet in a fenced block is not flagged)."""
+    return [m.group(0) for m in PLACEHOLDER_RE.finditer(CODE_RE.sub("", text))]
 FILLER_RE = re.compile(r"\b(TBD|TODO|FIXME|lorem ipsum)\b", re.IGNORECASE)
 MAX_WORDS = 700  # "under one page"
 
@@ -184,8 +191,8 @@ def validate(path, owners=None, components=None):
             detail.append("wrong order")
         errors.append(f"section headings must be exactly {SECTIONS} ({'; '.join(detail)})")
 
-    for m in PLACEHOLDER_RE.finditer(text):
-        errors.append(f"unfilled template placeholder: {m.group(0)[:60]}")
+    for ph in placeholders(text):
+        errors.append(f"unfilled template placeholder: {ph[:60]}")
     for name in MUST_BE_REAL:
         content = sections.get(name, "")
         if not content:
