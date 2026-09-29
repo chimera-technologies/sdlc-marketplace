@@ -1,5 +1,5 @@
 {
-  "description": "SDLC guardrails: headless write guard, and intent/spec validation on write.",
+  "description": "SDLC guardrails: headless write guard, build guard (no code before preflight and plan), and intent/spec validation on write.",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,6 +8,16 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/headless_write_guard.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/build_guard.py\"",
             "timeout": 15
           }
         ]

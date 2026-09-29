@@ -13,7 +13,8 @@ target two-repo setup.
 | 1 Plan | Done: `sdlc:write-intent`, create-intent, intent-check, intent-to-spec (boundary) |
 | 2 Design | Built: `sdlc:write-spec`, `sdlc:review-spec` (adversarial pre-screen), spec-check, spec-to-stories (Jira stories on merge) |
 | Cross-cutting | Started: `sdlc:security-policy` (draft), guardrail hooks, CLAUDE.md, CI, evals (6 intent cases), managed-settings example |
-| 3–6 | Later |
+| 3 Build | Built: `sdlc:build-story` (preflight: Graphify + Ponytail, plan, tests first, `sdlc:verifier`), build guard hook; product-repo `story-check.yml` |
+| 4–6 | Later |
 
 ## Layout
 
@@ -35,10 +36,12 @@ CLAUDE.md                           rules for Claude in this repo
 plugins/sdlc/
   .claude-plugin/plugin.json
   .mcp.json                         Atlassian remote MCP (interactive use)
-  hooks/hooks.json                  headless write guard (Pre) + intent validation (Post)
+  hooks/hooks.json                  headless write guard + build guard (Pre), intent/spec validation (Post)
+  agents/verifier.md                Build: independent check of a story (Sonnet, read and run only)
   skills/security-policy/SKILL.md   DRAFT policy rules SEC-1..8; owner must sign off
   skills/write-spec/                spec template, validate_spec.py, spec_stories.py, example
   skills/review-spec/               adversarial pre-screen + render_review.py
+  skills/build-story/               build_preflight.py, plan template, validate_plan.py, example
   skills/write-intent/
     SKILL.md                        interactive + headless entry
     reference/headless.md           rules when no human can answer
@@ -90,6 +93,33 @@ The tech stack is decided in the spec's **Technology and architecture**
 section: stated from the codebase for existing systems, or two or three
 options with a recommendation and a decision for the tech lead for
 greenfield work.
+
+## Build stage flow (interactive, in the product repo)
+
+Product repos opt in with `.sdlc/build.yaml` (see `bala-chimera/workout-plan-poc`).
+
+```
+/sdlc:build-story SCRUM-8
+  -> build_preflight.py      Graphify: pip install graphifyy (pinned), build the code graph
+                             (local tree-sitter, no tokens), wire it into Claude Code
+                             (machine-specific hooks go to .claude/settings.local.json);
+                             Ponytail: enable the pinned plugin, check it is active
+  -> plan mode               plans/<spec-slug>-s<n>.md: files, AC-1..n -> named tests  <- human approves
+  -> story/<key>-<name>      tests first, implement until green (one test file, line reporter)
+  -> validate_plan.py --check-tests, full suite, graphify update
+  -> sdlc:verifier           fresh context on Sonnet: PASS/FAIL per criterion
+  -> PR "SCRUM-8: <title>"   story-check.yml: plan + AC traceability; CI: e2e tests
+  -> owner merges            story-check.yml: Jira story -> Done, merge SHA commented
+```
+
+The **build guard** hook blocks writes to the repo's `code_paths` until the
+preflight has run (graph present, Ponytail enabled and active), the branch
+is the story branch, and the story's plan exists. Token savings come from
+Graphify (graph queries instead of reading files), Ponytail (less code
+written; about 10% cost in an independent benchmark), the verifier on a
+smaller model, one test file at a time with a short reporter, denied reads
+of generated folders, and one story per session. RTK was evaluated and left
+out: an independent benchmark found it raised cost.
 
 Interactive path: anyone runs `/sdlc:write-intent` (or just asks "turn
 CLM-123 into an intent") in Claude Code, which opens the same kind of PR

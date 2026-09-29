@@ -43,6 +43,11 @@ jobs:
           python plugins/sdlc/skills/write-spec/scripts/validate_spec.py \
             --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \
             --root "$d" "$d/specs/claims-status-self-service.md"
+          # The example plan is checked against the example spec's story S1.
+          mkdir -p "$d/plans"
+          cp plugins/sdlc/skills/build-story/examples/claims-status-self-service-s1.md "$d/plans/"
+          python plugins/sdlc/skills/build-story/scripts/validate_plan.py \
+            --root "$d" "$d/plans/claims-status-self-service-s1.md"
 
       - name: Plugin and marketplace versions match
         run: |

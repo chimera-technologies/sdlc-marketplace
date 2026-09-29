@@ -17,6 +17,7 @@ README "Splitting later").
     `scripts/`, `reference/` and `examples/` beside it
   - `hooks/hooks.json` plus Python hook scripts: rules that must always
     hold (skills are advisory, hooks are not)
+  - `agents/`: subagents (the Build stage's `verifier`)
 - `tests/`: unit tests for validators, hooks and eval scoring
 - `evals/<skill>/`: end-to-end eval cases that run the real skill
 - `platform/`: managed-settings example deployed by IT, not by the plugin
