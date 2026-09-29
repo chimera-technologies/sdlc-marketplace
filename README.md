@@ -13,8 +13,10 @@ target two-repo setup.
 | 1 Plan | Done: `sdlc:write-intent`, create-intent, intent-check, intent-to-spec (boundary) |
 | 2 Design | Built: `sdlc:write-spec`, `sdlc:review-spec` (adversarial pre-screen), spec-check, spec-to-stories (Jira stories on merge) |
 | Cross-cutting | Started: `sdlc:security-policy` (draft), guardrail hooks, CLAUDE.md, CI, evals (6 intent cases), managed-settings example |
+| 2b UI design | Built: `sdlc:design-ui` (Figma via the official Figma plugin; PNG per screen in `designs/<slug>/screens/`), `validate_design.py`, `export_screens.py`; product-repo `design-check.yml` |
 | 3 Build | Built: `sdlc:build-story` (preflight: Graphify + Ponytail, plan, tests first, `sdlc:verifier`), build guard hook; product-repo `story-check.yml` |
-| 4–6 | Later |
+| 4 PR review | Built: `sdlc:review-story` (conformance gate) + advisory reviewers from `.sdlc/review.json` (default: Anthropic `code-review`); product-repo `pr.yml` runs review, then Test |
+| 5–7 Test, Deploy, Maintain | Test runs in `pr.yml` after review; Deploy and Maintain later |
 
 ## Layout
 
@@ -42,6 +44,8 @@ plugins/sdlc/
   skills/write-spec/                spec template, validate_spec.py, spec_stories.py, example
   skills/review-spec/               adversarial pre-screen + render_review.py
   skills/build-story/               build_preflight.py, plan template, validate_plan.py, example
+  skills/design-ui/                 design.md template, validate_design.py, export_screens.py, example
+  skills/review-story/              PR conformance review (gate); uses review-spec's render_review.py
   skills/write-intent/
     SKILL.md                        interactive + headless entry
     reference/headless.md           rules when no human can answer
@@ -111,6 +115,38 @@ Product repos opt in with `.sdlc/build.yaml` (see `bala-chimera/workout-plan-poc
   -> PR "SCRUM-8: <title>"   story-check.yml: plan + AC traceability; CI: e2e tests
   -> owner merges            story-check.yml: Jira story -> Done, merge SHA commented
 ```
+
+## UI design sub-stage (interactive, in the product repo)
+
+```
+spec merged
+  -> /sdlc:design-ui spec=specs/<slug>.md      (or from=live url=... to capture an existing UI)
+       -> Figma plugin (figma@claude-plugins-official): create_new_file, use_figma frames with
+          variables and Auto Layout, get_screenshot self-check, get_metadata node ids
+       -> designs/<slug>/design.md             screen -> node, PNG, stories, REQs; states; tokens
+       -> export_screens.py                    Figma REST image export (FIGMA_TOKEN from env)
+                                               -> designs/<slug>/screens/<screen>.png
+       -> design/<slug> PR                     design-check.yml: validate_design.py   <- owner merges
+  -> Build: a story on a screen must name it in its plan's ## Design; verifier and PR review
+     compare the UI with the PNGs
+```
+
+## PR review stage (before Test, in the product repo)
+
+```
+story PR opened / pushed -> pr.yml
+  review-gate   sdlc:review-story (Sonnet, fresh session): plan, spec, design PNGs, REVIEW.md,
+                CLAUDE.md, security policy -> JSON -> sticky PR comment + review:* label;
+                fails on findings >= .sdlc/review.json fail_on (default high) or if it did not run
+  advisory      every entry in .sdlc/review.json "advisory" (default: Anthropic code-review
+                plugin, inline comments); never blocks; add custom plugin or repo skills here
+  traceability  (Test) validate_plan.py --check-tests          only after review-gate passes
+  e2e           (Test) Playwright suite                         only after review-gate passes
+```
+
+Anthropic's managed Code Review (Team/Enterprise, about $15-25 per review)
+also reads `REVIEW.md` and can be turned on alongside this; its check run
+never blocks merges.
 
 The **build guard** hook blocks writes to the repo's `code_paths` until the
 preflight has run (graph present, Ponytail enabled and active), the branch

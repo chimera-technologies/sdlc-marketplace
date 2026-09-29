@@ -48,6 +48,12 @@ jobs:
           cp plugins/sdlc/skills/build-story/examples/claims-status-self-service-s1.md "$d/plans/"
           python plugins/sdlc/skills/build-story/scripts/validate_plan.py \
             --root "$d" "$d/plans/claims-status-self-service-s1.md"
+          # The example design (manifest + PNGs) is checked against the example spec.
+          mkdir -p "$d/designs"
+          cp -r plugins/sdlc/skills/design-ui/examples/claims-status-self-service "$d/designs/"
+          python plugins/sdlc/skills/design-ui/scripts/validate_design.py \
+            --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \
+            --root "$d" "$d/designs/claims-status-self-service/design.md"
 
       - name: Plugin and marketplace versions match
         run: |

@@ -48,6 +48,21 @@ def story_criteria(spec_text, story_id):
     return None
 
 
+def story_screens(root, spec_slug, story_id):
+    """Screen ids in designs/<spec-slug>/design.md whose Stories column names this story."""
+    manifest = Path(root) / "designs" / spec_slug / "design.md"
+    if not manifest.is_file():
+        return []
+    _, body = vi.parse_frontmatter(manifest.read_text(encoding="utf-8"))
+    _, sections = vi.split_sections(body or "")
+    screens = []
+    for line in sections.get("Screens", "").splitlines():
+        cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
+        if len(cells) >= 4 and re.search(rf"\b{re.escape(story_id)}\b", cells[3]) and cells[0].lower() != "screen":
+            screens.append(cells[0])
+    return screens
+
+
 def test_names_found(root, names):
     """Which of the given test names appear in files under tests/."""
     texts = []
@@ -108,11 +123,23 @@ def validate(path, root=".", check_tests=False):
     if not re.search(r"^# Plan: S\d+ \S", body, re.MULTILINE):
         errors.append("missing H1 '# Plan: S<n> <story title>'")
     order, sections = vi.split_sections(body)
-    if order != SECTIONS:
-        missing = [s for s in SECTIONS if s not in order]
-        extra = [s for s in order if s not in SECTIONS]
+    # "Design" is optional, right after "Story"; it is required when the story has screens.
+    expected = SECTIONS[:1] + ["Design"] + SECTIONS[1:] if "Design" in order else SECTIONS
+    if order != expected:
+        missing = [s for s in expected if s not in order]
+        extra = [s for s in order if s not in expected]
         detail = ([f"missing {missing}"] if missing else []) + ([f"unexpected {extra}"] if extra else [])
-        errors.append(f"section headings must be exactly {SECTIONS} ({'; '.join(detail) or 'wrong order'})")
+        errors.append(f"section headings must be exactly {expected} ({'; '.join(detail) or 'wrong order'})")
+
+    screens = story_screens(root, spec_slug, story) if spec_slug and story else []
+    if screens:
+        design = sections.get("Design", "")
+        if not design:
+            errors.append(f"story {story} has design screens {screens} in designs/{spec_slug}/design.md; "
+                          "add a '## Design' section after '## Story' naming each one")
+        for sid in screens:
+            if design and not re.search(rf"(?<![a-z0-9-]){re.escape(sid)}(?![a-z0-9-])", design):
+                errors.append(f"Design section must reference screen {sid!r} (designs/{spec_slug}/screens/{sid}.png)")
     for ph in vi.placeholders(text):
         errors.append(f"unfilled template placeholder: {ph[:60]}")
     for name in MUST_BE_REAL:

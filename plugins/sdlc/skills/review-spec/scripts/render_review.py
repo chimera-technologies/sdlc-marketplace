@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Turn .sdlc-output/spec-review.json into PR markdown and a verdict.
+"""Turn a review JSON (spec pre-screen or PR review) into PR markdown and a verdict.
 
-Deterministic, standard library only. A missing or malformed review never
-fails the workflow: it becomes verdict "failed" so a human knows the
-pre-screen did not run.
+Deterministic, standard library only. A missing or malformed review becomes
+verdict "failed" so a human knows the review did not run.
 
 Usage:
   render_review.py .sdlc-output/spec-review.json --markdown review.md
-Prints the verdict (clean | concerns | failed) on stdout.
+  render_review.py .sdlc-output/pr-review.json --markdown review.md \
+      --title "Conformance review" --fail-on high
+Prints the verdict (clean | concerns | failed) on stdout. With --fail-on it
+exits 2 when the review did not run or any finding is at or above that
+severity (the PR review gate); without it, it always exits 0.
 """
 import argparse
 import json
@@ -46,17 +49,27 @@ def load(path):
     return {"verdict": verdict, "summary": str(data.get("summary", "")).strip(), "findings": findings}, None
 
 
-def render(review, problem):
+def gate_fails(review, problem, fail_on):
+    """True if the gate should block: the review did not run, or a finding is severe enough."""
+    if not fail_on:
+        return False
     if problem:
-        return ("### Adversarial pre-screen: ⚠️ did not complete\n\n"
-                f"{problem}. Review this spec without the pre-screen, or re-run the workflow.\n"), "failed"
+        return True
+    limit = SEVERITIES.index(fail_on)
+    return any(SEVERITIES.index(f["severity"]) <= limit for f in review["findings"])
+
+
+def render(review, problem, title="Adversarial pre-screen"):
+    if problem:
+        return (f"### {title}: ⚠️ did not complete\n\n"
+                f"{problem}. Review it by hand, or re-run the workflow.\n"), "failed"
     counts = {s: sum(f["severity"] == s for f in review["findings"]) for s in SEVERITIES}
     head = "✅ clean" if review["verdict"] == "clean" else "⚠️ concerns"
-    lines = [f"### Adversarial pre-screen: {head}", ""]
+    lines = [f"### {title}: {head}", ""]
     if review["summary"]:
         lines += [review["summary"], ""]
     lines += [f"{counts['high']} high · {counts['medium']} medium · {counts['low']} low. "
-              "The pre-screen flags; it does not approve. The owner decides.", ""]
+              "The review flags; it does not approve. The owner decides.", ""]
     for i, f in enumerate(review["findings"], 1):
         lines.append(f"{i}. {ICON[f['severity']]} **{f['severity']}**, *{f['section']}*: {f['issue']}")
         if f["evidence"]:
@@ -70,11 +83,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("review")
     ap.add_argument("--markdown", required=True, help="write the PR markdown here")
+    ap.add_argument("--title", default="Adversarial pre-screen", help="heading for the PR markdown")
+    ap.add_argument("--fail-on", choices=SEVERITIES, help="exit 2 if the review failed or a finding is this severe or worse")
     args = ap.parse_args()
     review, problem = load(args.review)
-    md, verdict = render(review, problem)
+    md, verdict = render(review, problem, args.title)
     Path(args.markdown).write_text(md, encoding="utf-8")
     print(verdict)
+    return 2 if gate_fails(review, problem, args.fail_on) else 0
 
 
 if __name__ == "__main__":

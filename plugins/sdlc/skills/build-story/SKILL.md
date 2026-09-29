@@ -62,7 +62,13 @@ the graph: `graphify query "<what you need>"`, `graphify explain "<name>"`
 (use `python -m graphify ...` if `graphify` is not on PATH). Read only the
 files the plan needs.
 
+If `designs/<spec-slug>/design.md` exists, read it and **look at the PNG of
+every screen whose Stories column names this story** (Read the images). The
+UI you build must match them: elements, order, copy, states and Tokens.
+
 Present a plan following `${CLAUDE_SKILL_DIR}/templates/plan.md`:
+- **Design** (required when the story has screens): each screen id and
+  what this story must match on it.
 - **Files**: every file you will add or change, and why.
 - **Tests**: one row per acceptance criterion of the story, in order,
   `AC-1..AC-n`, copying the criterion's words from the spec, each mapped to
@@ -96,6 +102,10 @@ confirm they fail for the right reason (missing behaviour, not a typo).
 Implement in small steps, re-running only the story's test file after each.
 Follow `CLAUDE.md`'s stack and rules. After 5 failed rounds on the same
 test, stop and tell the person what is blocking.
+
+If the story has screens: take one Playwright screenshot of each state the
+screens show (into `test-results/`, which is not committed), Read it next to
+the design PNG, and fix visible differences in layout, copy and colours.
 
 Then run, once each:
 - the full test suite (short reporter);

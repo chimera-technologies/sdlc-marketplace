@@ -13,6 +13,12 @@ created: <YYYY-MM-DD>
 <One or two sentences from the spec: what this story delivers and for whom.
 Name the requirements it covers (REQ-n).>
 
+## Design
+<Only when designs/<spec-slug>/design.md has screens for this story (then it
+is required): each screen id, what the story must match on it, and the
+tokens to use. Delete this section otherwise.>
+- <screen-id>: designs/<spec-slug>/screens/<screen-id>.png
+
 ## Files
 | File | Change |
 |---|---|

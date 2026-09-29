@@ -43,7 +43,12 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
    validation, no secrets, no unsafe HTML.
 6. **Scope**: changes outside the plan's Files table, or behaviour that no
    acceptance criterion asks for.
-7. **Minimalism did not cut corners**: nothing required by the spec
+7. **Design**: if the plan has a Design section, Read each named screen's
+   PNG in `designs/<slug>/screens/` and compare it with the built UI (the
+   code, and a Playwright screenshot if one is in `test-results/`). Report
+   missing elements, wrong order, wrong copy or wrong states as findings;
+   ignore pixel-level differences.
+8. **Minimalism did not cut corners**: nothing required by the spec
    (validation, error messages, tests, security) was removed or skipped to
    keep the code short.
 
