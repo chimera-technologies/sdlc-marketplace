@@ -23,8 +23,9 @@ README "Splitting later").
 - `intent/`, `specs/`: SDLC artifacts (product side)
 - `.sdlc/owners.yaml`: who approves what
 - `.github/workflows/`: `ci.yml` and `evals.yml` test the plugin;
-  `create-intent.yml`, `intent-check.yml` and `intent-to-spec.yml` run the
-  SDLC loop using the plugin from this same checkout
+  `create-intent.yml`, `intent-check.yml`, `intent-to-spec.yml`,
+  `spec-check.yml` and `spec-to-stories.yml` run the SDLC loop using the
+  plugin from this same checkout
 
 ## Commands
 

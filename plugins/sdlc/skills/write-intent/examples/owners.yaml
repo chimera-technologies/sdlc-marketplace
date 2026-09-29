@@ -11,6 +11,7 @@ components:
   claims-core:
     product_owner: "@claims-po"
     service_owner: "@example-org/claims-sre"
+    tech_lead: "@claims-tech-lead"
     jira_components: ["Claims Core", "Claims API"]
   customer-portal:
     product_owner: "@portal-po"

@@ -31,11 +31,18 @@ jobs:
       - name: Eval fixtures are consistent
         run: python evals/run_evals.py --skill write-intent --check-fixtures
 
-      - name: Worked example passes its own validator
+      - name: Worked examples pass their own validators
         run: |
           python plugins/sdlc/skills/write-intent/scripts/validate_intent.py \
             --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \
             plugins/sdlc/skills/write-intent/examples/*.md
+          # The example spec is checked against the example intent it came from.
+          d=$(mktemp -d); mkdir -p "$d/intent" "$d/specs"
+          cp plugins/sdlc/skills/write-intent/examples/claims-status-self-service.md "$d/intent/"
+          cp plugins/sdlc/skills/write-spec/examples/claims-status-self-service.md "$d/specs/"
+          python plugins/sdlc/skills/write-spec/scripts/validate_spec.py \
+            --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \
+            --root "$d" "$d/specs/claims-status-self-service.md"
 
       - name: Plugin and marketplace versions match
         run: |

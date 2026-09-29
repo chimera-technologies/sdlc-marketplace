@@ -5,6 +5,8 @@
 # product_owner: approves product-facing intents (behaviour, UX, wording)
 # service_owner: triages operational intents from Maintain, Claude Security,
 #                Claude Tag and technical tickets
+# tech_lead:     approves the design (spec) as well as the owner when risk
+#                is high, and decides the tech stack for greenfield work
 # jira_components: Jira component names that map to this component
 #
 # POC: no components yet (the Jira space is team-managed), so every intent
@@ -14,10 +16,12 @@
 #     customer-portal:
 #       product_owner: "@<po-handle>"
 #       service_owner: "@<org>/<team>"
+#       tech_lead: "@<tech-lead-handle>"
 #       jira_components: ["Customer Portal"]
 
 default:
   product_owner: "@bala-chimera"
   service_owner: "@bala-chimera"
+  tech_lead: "@bala-chimera"
 
 components: {}

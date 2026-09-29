@@ -11,8 +11,8 @@ target two-repo setup.
 | Stage | Status |
 |---|---|
 | 1 Plan | Done: `sdlc:write-intent`, create-intent, intent-check, intent-to-spec (boundary) |
-| Cross-cutting | Started: `sdlc:security-policy` (draft), guardrail hooks, CLAUDE.md, CI, evals (6 cases), managed-settings example |
-| 2 Design | Next: `sdlc:write-spec`, adversarial pre-screen reviewer |
+| 2 Design | Built: `sdlc:write-spec`, `sdlc:review-spec` (adversarial pre-screen), spec-check, spec-to-stories (Jira stories on merge) |
+| Cross-cutting | Started: `sdlc:security-policy` (draft), guardrail hooks, CLAUDE.md, CI, evals (6 intent cases), managed-settings example |
 | 3–6 | Later |
 
 ## Layout
@@ -29,12 +29,16 @@ CLAUDE.md                           rules for Claude in this repo
   evals.yml                         plugin: end-to-end evals (POC: manual run only)
   create-intent.yml                 SDLC: headless intake (Jira now; Maintain/Security/Tag later)
   intent-check.yml                  SDLC: validate + route reviewer + Jira link-back
-  intent-to-spec.yml                SDLC: Plan -> Design trigger on merge
+  intent-to-spec.yml                SDLC: intent merged -> write-spec -> review-spec -> spec PR
+  spec-check.yml                    SDLC: validate spec + route owner/tech lead + Jira link-back
+  spec-to-stories.yml               SDLC: spec merged -> Jira stories under the Epic (no model)
 plugins/sdlc/
   .claude-plugin/plugin.json
   .mcp.json                         Atlassian remote MCP (interactive use)
   hooks/hooks.json                  headless write guard (Pre) + intent validation (Post)
   skills/security-policy/SKILL.md   DRAFT policy rules SEC-1..8; owner must sign off
+  skills/write-spec/                spec template, validate_spec.py, spec_stories.py, example
+  skills/review-spec/               adversarial pre-screen + render_review.py
   skills/write-intent/
     SKILL.md                        interactive + headless entry
     reference/headless.md           rules when no human can answer
@@ -66,6 +70,27 @@ Jira ticket labelled "intent"
   -> intent-to-spec.yml: Design starts
 ```
 
+## Design stage flow (headless)
+
+```
+intent merged to main
+  -> intent-to-spec.yml
+       -> /sdlc:write-spec mode=headless      specs/<slug>.md (stack decided here)
+       -> validate_spec.py                    draft PR if invalid
+       -> /sdlc:review-spec (fresh session)   findings in PR body, label review:clean|concerns|failed
+       -> PR on spec/<slug>, reviewers = owner (+ tech lead when risk is high)
+  -> spec-check.yml: validate (required check), route, label
+  -> OWNER (+ TECH LEAD) merges (accept) or closes with reason (reject)   <- human gate
+  -> spec-check.yml link-back: Jira record gets the outcome
+  -> spec-to-stories.yml: one Jira story per "### S<n>:" in Work breakdown,
+     under the Epic (or linked, if the record isn't an Epic); idempotent
+```
+
+The tech stack is decided in the spec's **Technology and architecture**
+section: stated from the codebase for existing systems, or two or three
+options with a recommendation and a decision for the tech lead for
+greenfield work.
+
 Interactive path: anyone runs `/sdlc:write-intent` (or just asks "turn
 CLM-123 into an intent") in Claude Code, which opens the same kind of PR
 and goes through the same checks. Given a requirement document, it first
@@ -92,7 +117,7 @@ claude.ai using the GitHub and Atlassian connectors.
      subscription; use an `ANTHROPIC_API_KEY` instead for shared/production use),
      `SDLC_APP_PRIVATE_KEY`, `JIRA_API_TOKEN`
 4. **Branch protection on `main`:** require the `Intent check / validate`
-   status check. Private repos on a free GitHub plan can't enforce this;
+   and `Spec check / validate` status checks. Private repos on a free GitHub plan can't enforce this;
    the checks still run. With a single owner, don't require a code-owner
    review: you can't approve your own PRs.
 5. **Jira Automation rule** (per Jira space):

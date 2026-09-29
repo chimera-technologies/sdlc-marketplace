@@ -1,0 +1,81 @@
+name: Spec to stories
+
+# Design -> Build boundary. Fires once an owner merges a spec into main and
+# creates one Jira story per "### S<n>:" entry in its Work breakdown, under
+# the intent's Epic (or linked to its record if that is not an Epic).
+# Deterministic: no model involved. Idempotent: re-runs and spec revisions
+# only add stories that don't exist yet.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'specs/**.md'
+  workflow_dispatch:
+    inputs:
+      spec_file:
+        description: "spec_file: re-run for one merged spec, e.g. specs/todo-list-tracker.md"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spec-to-stories
+  cancel-in-progress: false
+
+env:
+  VALIDATE_SPEC: plugins/sdlc/skills/write-spec/scripts/validate_spec.py
+  SPEC_STORIES: plugins/sdlc/skills/write-spec/scripts/spec_stories.py
+  JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+  JIRA_USER_EMAIL: ${{ vars.JIRA_USER_EMAIL }}
+
+jobs:
+  stories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create stories in Jira
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          MANUAL_FILE: ${{ inputs.spec_file }}
+        run: |
+          set -euo pipefail
+          if [ -z "$JIRA_API_TOKEN" ]; then echo "::notice::Jira not configured; skipping."; exit 0; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            [[ "$MANUAL_FILE" =~ ^specs/[a-z0-9-]+\.md$ ]] || { echo "::error::spec_file must look like specs/<slug>.md"; exit 1; }
+            files=("$MANUAL_FILE")
+          else
+            if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+              BEFORE="$AFTER^"
+            fi
+            mapfile -t files < <(git diff --name-only --diff-filter=AMR "$BEFORE" "$AFTER" -- 'specs/*.md')
+          fi
+          echo "### Stories from specs" >> "$GITHUB_STEP_SUMMARY"
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || { echo "::error::$f is not on main"; exit 1; }
+            python3 "$VALIDATE_SPEC" --owners .sdlc/owners.yaml "$f"   # never create stories from an invalid spec
+            rid=$(python3 "$VALIDATE_SPEC" --json "$f" | jq -r '.record_id // "none"')
+            if [ "$rid" = "none" ]; then
+              echo "::notice::$f has no record_id (no Jira record); no stories created."
+              echo "- \`$f\`: no Jira record, skipped" >> "$GITHUB_STEP_SUMMARY"; continue
+            fi
+            python3 "$SPEC_STORIES" "$f" --create > "$RUNNER_TEMP/result.json"
+            cat "$RUNNER_TEMP/result.json"
+            created=$(jq -r '.created | length' "$RUNNER_TEMP/result.json")
+            existing=$(jq -r '.existing | length' "$RUNNER_TEMP/result.json")
+            echo "- \`$f\` -> $rid: $created created, $existing already existed" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$created" -gt 0 ]; then
+              list=$(jq -r '.created[] | "- \(.key) \(.summary)"' "$RUNNER_TEMP/result.json")
+              msg=$(printf 'Stories created from %s (%s):\n%s' "$f" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$AFTER/$f" "$list")
+              jq -n --arg b "$msg" '{body:$b}' | curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+                -H "Content-Type: application/json" -X POST --data @- \
+                "$JIRA_BASE_URL/rest/api/2/issue/$rid/comment" >/dev/null
+            fi
+          done

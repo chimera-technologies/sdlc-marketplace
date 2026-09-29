@@ -1,5 +1,5 @@
 {
-  "description": "SDLC guardrails: headless write guard and intent validation on write.",
+  "description": "SDLC guardrails: headless write guard, and intent/spec validation on write.",
   "hooks": {
     "PreToolUse": [
       {
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/validate_intent_on_write.py\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/validate_on_write.py\"",
             "timeout": 30
           }
         ]

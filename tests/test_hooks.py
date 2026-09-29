@@ -77,7 +77,7 @@ class HeadlessWriteGuardTest(HookTestBase):
 class ValidateOnWriteTest(HookTestBase):
     def validate(self, path):
         event = {"hook_event_name": "PostToolUse", "tool_name": "Write", "tool_input": {"file_path": str(path)}}
-        return run_hook("validate_intent_on_write.py", event, self.project)
+        return run_hook("validate_on_write.py", event, self.project)
 
     def test_valid_intent_passes(self):
         target = self.project / "intent" / EXAMPLE.name
@@ -95,8 +95,20 @@ class ValidateOnWriteTest(HookTestBase):
         (self.project / "intent" / "bad.md").write_text("no frontmatter", encoding="utf-8")
         self.assertEqual(self.validate("intent/bad.md").returncode, 2)
 
+    def test_valid_spec_passes_and_invalid_is_sent_back(self):
+        skills = ROOT / "plugins" / "sdlc" / "skills"
+        shutil.copy(EXAMPLE, self.project / "intent" / EXAMPLE.name)
+        (self.project / "specs").mkdir()
+        spec = self.project / "specs" / EXAMPLE.name
+        shutil.copy(skills / "write-spec" / "examples" / EXAMPLE.name, spec)
+        self.assertEqual(self.validate(spec).returncode, 0)
+        spec.write_text(spec.read_text(encoding="utf-8").replace("## Design", "## How"), encoding="utf-8")
+        r = self.validate(spec)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("validate_spec.py", r.stderr)
+
     def test_other_files_ignored(self):
-        for rel in ["README.md", "intent/sub/x.md", "intent/notes.txt", "specs/x.md"]:
+        for rel in ["README.md", "intent/sub/x.md", "intent/notes.txt", "specs/notes.txt", "docs/x.md"]:
             p = self.project / rel
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("anything", encoding="utf-8")

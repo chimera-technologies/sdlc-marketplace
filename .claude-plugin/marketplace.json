@@ -8,8 +8,8 @@
     {
       "name": "sdlc",
       "source": "./plugins/sdlc",
-      "description": "AI-native SDLC loop: write-intent (Plan), security-policy, and guardrail hooks.",
-      "version": "0.2.1"
+      "description": "AI-native SDLC loop: write-intent (Plan), write-spec and review-spec (Design), security-policy, and guardrail hooks.",
+      "version": "0.3.0"
     }
   ]
 }

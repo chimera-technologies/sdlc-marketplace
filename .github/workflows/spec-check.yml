@@ -1,0 +1,121 @@
+name: Spec check
+
+# Deterministic gate on every spec PR (generated or hand-written):
+#   validate -> structure, frontmatter, intent open questions carried over,
+#               stories well formed; mark this job a required status check.
+#   route    -> requests review from the owner, plus the tech lead when risk
+#               is high, and labels risk.
+#   link     -> on merge or close, writes the outcome back to the Jira record.
+#               Merging also starts spec-to-stories.yml. No model involved.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+    paths:
+      - 'specs/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  VALIDATE_SPEC: plugins/sdlc/skills/write-spec/scripts/validate_spec.py
+  JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+  JIRA_USER_EMAIL: ${{ vars.JIRA_USER_EMAIL }}
+
+jobs:
+  validate:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mint short-lived GitHub App token (reviewer requests)
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.SDLC_APP_ID }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # merge commit + base, so HEAD^1 is the base tip
+
+      - name: Validate changed specs
+        id: check
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git diff --name-only --diff-filter=AMR HEAD^1 HEAD -- 'specs/*.md')
+          if [ "${#files[@]}" -eq 0 ]; then echo "No spec files added or modified."; exit 0; fi
+          if [ "${#files[@]}" -gt 1 ]; then echo "::warning::${#files[@]} specs in one PR; one spec per PR keeps review and story creation clean."; fi
+          python3 "$VALIDATE_SPEC" --owners .sdlc/owners.yaml "${files[@]}"
+          python3 "$VALIDATE_SPEC" --json "${files[0]}" > "$RUNNER_TEMP/spec.json"
+          {
+            echo "owner=$(jq -r '.owner // ""' "$RUNNER_TEMP/spec.json")"
+            echo "tech_lead=$(jq -r '.tech_lead // ""' "$RUNNER_TEMP/spec.json")"
+            echo "risk=$(jq -r '.risk // "high"' "$RUNNER_TEMP/spec.json")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Route review and label
+        if: steps.check.outputs.owner != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # GITHUB_TOKEN cannot request team reviewers; the App can.
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          OWNER: ${{ steps.check.outputs.owner }}
+          LEAD: ${{ steps.check.outputs.tech_lead }}
+          RISK: ${{ steps.check.outputs.risk }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          for l in spec "risk:$RISK"; do gh label create "$l" --force >/dev/null 2>&1 || true; done
+          gh pr edit "$PR" --add-label "spec,risk:$RISK"
+          for l in risk:low risk:medium risk:high; do
+            if [ "$l" != "risk:$RISK" ]; then gh pr edit "$PR" --remove-label "$l" >/dev/null 2>&1 || true; fi
+          done
+          people=("$OWNER")
+          if [ "$RISK" = "high" ] && [ -n "$LEAD" ]; then people+=("$LEAD"); fi
+          for who in $(printf '%s\n' "${people[@]}" | sort -u); do
+            reviewer="${who#@}"
+            if [ "$reviewer" != "$AUTHOR" ]; then
+              GH_TOKEN="$APP_TOKEN" gh pr edit "$PR" --add-reviewer "$reviewer" || echo "::warning::could not request review from $who"
+            fi
+          done
+
+  link-back:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merged && github.event.pull_request.merge_commit_sha || github.event.pull_request.head.sha }}
+
+      - name: Write outcome to Jira
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+        run: |
+          set -euo pipefail
+          if [ -z "$JIRA_API_TOKEN" ]; then echo "Jira not configured; skipping."; exit 0; fi
+          mapfile -t files < <(gh pr view "$PR" --json files -q '.files[].path' | grep '^specs/.*\.md$' || true)
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || continue
+            rid=$(python3 "$VALIDATE_SPEC" --json "$f" 2>/dev/null | jq -r '.record_id // "none"')
+            [ "$rid" = "none" ] && continue
+            if [ "$MERGED" = "true" ]; then
+              msg="Spec ACCEPTED by @$MERGED_BY and merged as $SHA ($f). Stories are being created from its Work breakdown. $PR_URL"
+            else
+              msg="Spec CLOSED without merge (design rejected or superseded). See reason in $PR_URL"
+            fi
+            jq -n --arg b "$msg" '{body:$b}' | curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+              -H "Content-Type: application/json" -X POST --data @- \
+              "$JIRA_BASE_URL/rest/api/2/issue/$rid/comment" >/dev/null
+            echo "Linked $f -> $rid"
+          done
