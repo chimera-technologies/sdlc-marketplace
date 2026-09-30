@@ -58,6 +58,12 @@ JIRA_KEY_RE = re.compile(r"^[A-Z][A-Z0-9]+$")
 # --------------------------------------------------------------------------- answers
 
 
+def write_lf(path, text):
+    """Write text with LF line endings (Path.write_text has no newline= before 3.10)."""
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
 def normalize(answers):
     """Fill defaults and validate. Returns (answers, errors)."""
     a = json.loads(json.dumps(answers))  # deep copy
@@ -481,7 +487,7 @@ def apply(root, planned):
             report.append(("unchanged", rel))
             continue
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8", newline="\n")
+        write_lf(p, content)
         report.append(("created" if old is None else "updated", rel))
     return report
 
@@ -573,7 +579,7 @@ def set_stack(root, stack):
         line = f"{key}: {val}".rstrip()
         text = pat.sub(line, text) if pat.search(text) else text.rstrip("\n") + f"\n{line}\n"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_lf(path, text)
     return path
 
 

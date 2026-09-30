@@ -47,9 +47,15 @@ def read_json(path):
         return {}
 
 
+def write_lf(path, text):
+    """Write text with LF line endings (Path.write_text has no newline= before 3.10)."""
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
 def write_json(path, data):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+    write_lf(path, json.dumps(data, indent=2) + "\n")
 
 
 def run(cmd, cwd, timeout=600):
@@ -200,7 +206,7 @@ def step_gitignore(project, report):
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     text, changed = ensure_gitignore(text, GITIGNORE_LINES)
     if changed:
-        path.write_text(text, encoding="utf-8", newline="\n")
+        write_lf(path, text)
         report.append(".gitignore: added graphify-out/ and local settings")
 
 

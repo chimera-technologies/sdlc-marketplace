@@ -4,6 +4,12 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.6.1 (2026-09-30)
+
+- `init_project.py` and `build_preflight.py` run on Python 3.9 again
+  (they used `Path.write_text(newline=)`, which needs 3.10).
+- Reusable workflows: shellcheck findings fixed.
+
 ## v0.6.0 (2026-09-30)
 
 The marketplace becomes a boilerplate for any project and any tech stack.
