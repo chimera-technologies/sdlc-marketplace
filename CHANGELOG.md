@@ -4,6 +4,34 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.7.0 (2026-09-30)
+
+UI design is now automatic: every spec PR comes with mockups of its screens.
+
+- **Design workflow** (`sdlc-intent-to-spec.yml`, new input `ui_design`,
+  default `false`): after the spec, `sdlc:design-ui` runs headless and
+  writes one static HTML mockup per screen plus `designs/<slug>/design.md`;
+  `render_mockups.py` renders each to PNG with the runner's headless Chrome
+  (scripts and network blocked); the design is validated and added to the
+  spec PR, with the screens shown in the PR body. A design that fails is
+  left out (kept as a run artifact), so the spec PR is never blocked.
+- **design-ui skill**: `to=mockup` (headless and interactive),
+  `from=mockups` to import the mockups into Figma for a designer, and the
+  existing `to=figma` / `from=live`. Figma cannot be driven from CI (its MCP
+  server takes only a person's OAuth login), so Figma stays interactive.
+- **Design manifest**: new `source: mockup | figma` key (default `figma`,
+  so existing designs stay valid); the Screens table's second column is now
+  `Source` (a Figma node id, or `mockups/<screen>.html`). Mockups must be
+  self-contained: no scripts, event handlers, frames or remote URLs.
+- New `render_mockups.py`, `templates/mockup.html` and a mockup example.
+
+### Upgrading
+
+- Run `/sdlc:init upgrade=v0.7.0`: the regenerated `sdlc-push.yml` passes
+  `ui_design: true` to the Design stage when UI design is on.
+- Specs merged before the upgrade have no mockups: run
+  `/sdlc:design-ui spec=specs/<slug>.md to=mockup` and open a design PR.
+
 ## v0.6.3 (2026-09-30)
 
 - The Test stage also skips (with a notice) while none of `.sdlc/build.yaml`'s

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="sdlc-size" content="1280x800">
+<title>claim-status-list</title>
+<style>
+  :root {
+    --color-text: #1d2522; --color-muted: #5d6a65; --color-accent: #17715f;
+    --color-border: #d9dfdc; --color-surface: #ffffff; --color-page: #f4f6f5;
+    --space: 8px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--color-page); color: var(--color-text);
+         font: 16px/24px "IBM Plex Sans", "Segoe UI", Arial, sans-serif; }
+  header { background: var(--color-surface); border-bottom: 1px solid var(--color-border);
+           padding: calc(var(--space) * 2) calc(var(--space) * 4); font-weight: 600; }
+  main { width: 720px; margin: calc(var(--space) * 5) auto; }
+  h1 { font-size: 28px; line-height: 36px; margin: 0 0 var(--space); }
+  .lede { color: var(--color-muted); margin: 0 0 calc(var(--space) * 3); }
+  .claim { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px;
+           padding: calc(var(--space) * 2) calc(var(--space) * 3); margin-bottom: calc(var(--space) * 2); }
+  .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .ref { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--color-muted); }
+  .status { font-weight: 600; color: var(--color-accent); }
+  .next { margin: var(--space) 0 0; color: var(--color-muted); }
+</style>
+</head>
+<body>
+<header>Acme Insurance &middot; My claims</header>
+<main>
+  <h1>Your open claims</h1>
+  <p class="lede">Newest first. Status is updated every 15 minutes.</p>
+  <section class="claim">
+    <div class="row"><span class="ref">CLM-20931 &middot; Water damage &middot; opened 12 Sep</span><span class="status">Assessing</span></div>
+    <p class="next">Next: an assessor will contact you within 3 working days.</p>
+  </section>
+  <section class="claim">
+    <div class="row"><span class="ref">CLM-20417 &middot; Car windscreen &middot; opened 28 Aug</span><span class="status">Approved</span></div>
+    <p class="next">Next: payment is sent to your bank account within 5 working days.</p>
+  </section>
+</main>
+</body>
+</html>

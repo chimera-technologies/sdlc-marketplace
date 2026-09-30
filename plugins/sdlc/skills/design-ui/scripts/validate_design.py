@@ -13,6 +13,11 @@ Checks the manifest structure, that every screen has a stored PNG under
 designs/<slug>/screens/, that every story in the spec is either on a
 screen or listed under "No UI", and that referenced stories and REQs exist.
 
+`source: figma` (the default) screens name a Figma node; `source: mockup`
+screens name an HTML mockup, designs/<slug>/mockups/<screen>.html, which must
+be self-contained and static: no scripts, frames or remote resources, so
+render_mockups.py can screenshot it safely with scripts and network off.
+
 Exit code 0 = valid (warnings allowed), 1 = at least one error.
 """
 import argparse
@@ -28,7 +33,9 @@ vs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(vs)
 vi = vs.vi
 
-REQUIRED_KEYS = ["id", "spec", "figma_file", "figma_file_key", "owner", "created"]
+REQUIRED_KEYS = ["id", "spec", "owner", "created"]
+FIGMA_KEYS = ["figma_file", "figma_file_key"]   # required when source is figma
+SOURCES = ["figma", "mockup"]
 SECTIONS = ["Screens", "States", "Tokens", "No UI"]
 FIGMA_URL_RE = re.compile(r"^https://(?:www\.)?figma\.com/(?:design|file)/([A-Za-z0-9]+)(?:/|\?|$)")
 NODE_RE = re.compile(r"^\d+[:-]\d+$")
@@ -37,6 +44,34 @@ ROW_RE = re.compile(r"^\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 STORY_REF_RE = re.compile(r"\bS\d+\b")
 REQ_REF_RE = re.compile(r"\bREQ-\d+\b")
+# Mockups are rendered with scripts and network off; reject anything that
+# would need either, so the PNG is exactly what the HTML says.
+MOCKUP_FORBIDDEN = [
+    (re.compile(r"<\s*(script|iframe|frame|object|embed|base|form)\b", re.I), "must not contain <{0}>"),
+    (re.compile(r"\bon[a-z]+\s*=", re.I), "must not use inline event handlers ({0})"),
+    (re.compile(r"javascript\s*:", re.I), "must not use {0} URLs"),
+    (re.compile(r"(?:\b(?:src|href|srcset|action|poster)\s*=\s*[\"']?|url\(\s*[\"']?|@import\s+[\"']?)(?:https?:)?//", re.I),
+     "must not load remote resources (inline them: CSS in <style>, images as data: URIs)"),
+]
+SIZE_META_RE = re.compile(r"<meta\s+name=[\"']sdlc-size[\"']\s+content=[\"'](\d{3,4})x(\d{3,5})[\"']", re.I)
+
+
+def mockup_problems(html):
+    """Reasons an HTML mockup is not safe to render (empty list = fine)."""
+    problems = []
+    for pattern, message in MOCKUP_FORBIDDEN:
+        m = pattern.search(html)
+        if m:
+            problems.append(message.format(m.group(0).strip()[:30]))
+    if not re.search(r"<html\b", html, re.I):
+        problems.append("must be a complete HTML document (<html>...</html>)")
+    return problems
+
+
+def mockup_size(html, default=(1280, 800)):
+    """(width, height) from <meta name="sdlc-size" content="1280x800">."""
+    m = SIZE_META_RE.search(html)
+    return (int(m.group(1)), int(m.group(2))) if m else default
 
 
 def parse_screens(body):
@@ -81,9 +116,17 @@ def validate(path, owners=None, root=".", check_images=True):
         return {}, ["missing YAML frontmatter block (--- ... ---) at top of file"], warnings
     for bad in fm.pop("__bad__", []):
         errors.append(f"unparseable frontmatter line: {bad!r}")
-    for key in REQUIRED_KEYS:
+    source = fm.get("source") or "figma"
+    if source not in SOURCES:
+        errors.append(f"frontmatter: source must be one of {SOURCES}, got {source!r}")
+    for key in REQUIRED_KEYS + (FIGMA_KEYS if source == "figma" else []):
         if not fm.get(key):
             errors.append(f"frontmatter: '{key}' is required")
+    if source == "mockup":
+        # Not in Figma yet: the keys may be absent or "none".
+        for key in FIGMA_KEYS:
+            if fm.get(key) == "none":
+                fm.pop(key)
 
     if path.name != "design.md":
         errors.append("the manifest must be named design.md (designs/<slug>/design.md)")
@@ -139,14 +182,25 @@ def validate(path, owners=None, root=".", check_images=True):
         if sid in seen:
             errors.append(f"screen {sid!r} is listed twice")
         seen.add(sid)
-        if not NODE_RE.match(r["node"]):
+        if source == "figma" and not NODE_RE.match(r["node"]):
             errors.append(f"screen {sid!r}: Figma node must look like 1:2, got {r['node']!r}")
+        elif source == "mockup":
+            if r["node"] != f"mockups/{sid}.html":
+                errors.append(f"screen {sid!r}: source must be mockups/{sid}.html, got {r['node']!r}")
+            else:
+                html = path.parent / r["node"]
+                if not html.is_file():
+                    errors.append(f"screen {sid!r}: {html.as_posix()} not found")
+                else:
+                    for p in mockup_problems(html.read_text(encoding="utf-8", errors="replace")):
+                        errors.append(f"screen {sid!r}: {html.as_posix()} {p}")
         if r["screenshot"] != f"screens/{sid}.png":
             errors.append(f"screen {sid!r}: screenshot must be screens/{sid}.png, got {r['screenshot']!r}")
         elif check_images:
             png = path.parent / r["screenshot"]
             if not png.is_file():
-                errors.append(f"screen {sid!r}: {png.as_posix()} not found (run export_screens.py)")
+                tool = "render_mockups.py" if source == "mockup" else "export_screens.py"
+                errors.append(f"screen {sid!r}: {png.as_posix()} not found (run {tool})")
             elif png.read_bytes()[:8] != PNG_MAGIC:
                 errors.append(f"screen {sid!r}: {png.as_posix()} is not a PNG")
         if not r["stories"]:

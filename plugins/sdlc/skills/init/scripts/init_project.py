@@ -272,7 +272,7 @@ def render_claude_block(a):
     if s["design"]:
         rows.append("| Design | automatic when an intent merges (`sdlc:write-spec`, `sdlc:review-spec`) | `specs/<slug>.md` | owner (+ tech lead if risk is high) merges |")
     if s["ui_design"]:
-        rows.append("| UI design | `/sdlc:design-ui spec=specs/<slug>.md` | `designs/<slug>/` | owner merges the design PR |")
+        rows.append("| UI design | automatic with the spec (HTML mockups); `/sdlc:design-ui` to redo them or refine them in Figma | `designs/<slug>/` | owner merges the spec PR (or a design PR) |")
     if s["build"]:
         rows.append("| Build | `/sdlc:build-story <KEY>` | `plans/<slug>-s<n>.md`, code, tests | plan approved in plan mode, verifier PASS |")
     if s["pr_review"]:
@@ -294,7 +294,8 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
 {chr(10).join(rows)}
 
 - One artifact per PR on its own branch (`intent/`, `spec/`, `design/`,
-  `story/`, `release/`); never commit them straight to `{a['base_branch']}`.
+  `story/`, `release/`; a spec PR also carries its UI mockups); never
+  commit them straight to `{a['base_branch']}`.
 - Status lives in git: open PR = proposed, merged = accepted, closed = rejected.
 - Owners come from `.sdlc/owners.yaml`; the stack and test commands from
   `.sdlc/build.yaml`; review rules from `REVIEW.md`.
@@ -358,7 +359,8 @@ def render_callers(a):
     if s["design"]:
         jobs.append("  intent-to-spec:\n" + call(
             a, "sdlc-intent-to-spec.yml",
-            extra_with=f"      model: {m['spec']}\n      intent_file: ${{{{ inputs.rerun == 'intent-to-spec' && inputs.file || '' }}}}\n",
+            extra_with=f"      model: {m['spec']}\n      intent_file: ${{{{ inputs.rerun == 'intent-to-spec' && inputs.file || '' }}}}\n"
+                       + ("      ui_design: true\n" if s["ui_design"] else ""),
             if_expr="github.event_name == 'push' || inputs.rerun == 'intent-to-spec'"))
         jobs.append("  spec-to-stories:\n" + call(
             a, "sdlc-spec-to-stories.yml",
@@ -608,7 +610,8 @@ def checklist(a):
         extra.append("  6. Environments: create 'staging' and 'production' (Settings > Environments);\n"
                      "     give production required reviewers (the release manager).")
     if a["stages"]["ui_design"]:
-        extra.append("  7. UI design: each designer logs in to Figma (/mcp); set FIGMA_TOKEN for PNG export.")
+        extra.append("  7. UI design: mockups come with every spec PR. To refine them in Figma, a designer\n"
+                     "     logs in (/mcp), sets FIGMA_TOKEN, and runs /sdlc:design-ui from=mockups.")
     return SETUP_CHECKLIST.format(
         repo=a["sdlc_repo"], base=a["base_branch"],
         jira_vars=", JIRA_BASE_URL, JIRA_USER_EMAIL" if a["jira"].get("enabled") else "",
