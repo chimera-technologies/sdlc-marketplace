@@ -1,0 +1,93 @@
+name: "SDLC Test: main"
+
+# Reusable workflow of the sdlc plugin (workflow_call). After every merge to the base branch: run the project's tests.
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# End-to-end tests on main after every merge. Pull requests run the same
+# suite in pr.yml, after the PR review gate (Build -> PR review -> Test).
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Set up the project's stack (.sdlc/build.yaml)
+        id: stack
+        uses: ./.sdlc-plugin/.github/actions/setup-stack
+        with:
+          require-tests: "true"
+
+      - name: Run the project's tests (test_command)
+        env:
+          CMD: ${{ steps.stack.outputs.test_command }}
+        run: bash -euo pipefail -c "$CMD"
+
+      - name: Upload test report
+        if: always() && steps.stack.outputs.report_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ github.run_id }}-${{ github.job }}
+          path: ${{ steps.stack.outputs.report_path }}
+          if-no-files-found: ignore
+          retention-days: 30

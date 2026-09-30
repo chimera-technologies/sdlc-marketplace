@@ -1,0 +1,128 @@
+name: "SDLC Design: UI design check"
+
+# Reusable workflow of the sdlc plugin (workflow_call). UI design gate: validate designs/<slug>/design.md and its PNGs, request the owner.
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# UI design sub-stage (Design): validate each designs/<slug>/design.md a PR
+# adds or changes: manifest structure, a stored PNG per screen, every spec
+# story on a screen or under "No UI", stories and REQs that exist in the
+# spec. Requests review from the design's owner. Merging the PR accepts the
+# design; /sdlc:build-story then builds against it.
+# Runs on every PR (no path filter) so "Design check / validate" can be a
+# required check: PRs that don't touch designs/ pass straight away.
+# No model involved.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  SDLC_PLUGIN_REPO: ${{ inputs.sdlc_repo }}
+  SDLC_PLUGIN_REF: ${{ inputs.sdlc_ref }}
+  VALIDATE_DESIGN: .sdlc-plugin/plugins/sdlc/skills/design-ui/scripts/validate_design.py
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # merge commit + base, so HEAD^1 is the base tip
+
+      - name: Find changed designs
+        id: changed
+        run: |
+          set -euo pipefail
+          manifests=$(git diff --name-only --diff-filter=AMR HEAD^1 HEAD -- 'designs/' \
+                      | awk -F/ 'NF>=3 {print $1"/"$2"/design.md"}' | sort -u | paste -sd' ' -)
+          echo "manifests=$manifests" >> "$GITHUB_OUTPUT"
+          if [ -n "$manifests" ]; then echo "Designs to validate: $manifests"; else echo "No designs changed; nothing to validate."; fi
+
+      - name: Mint short-lived GitHub App token
+        if: steps.changed.outputs.manifests != ''
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Check out pinned sdlc plugin
+        if: steps.changed.outputs.manifests != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SDLC_PLUGIN_REPO }}
+          ref: ${{ env.SDLC_PLUGIN_REF }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Validate changed designs
+        if: steps.changed.outputs.manifests != ''
+        id: check
+        env:
+          MANIFESTS: ${{ steps.changed.outputs.manifests }}
+        run: |
+          set -euo pipefail
+          read -r -a manifests <<<"$MANIFESTS"
+          for m in "${manifests[@]}"; do
+            [ -f "$m" ] || { echo "::error::$m is missing (every designs/<slug>/ needs a design.md)"; exit 1; }
+          done
+          python3 "$VALIDATE_DESIGN" --owners .sdlc/owners.yaml "${manifests[@]}"
+          owner=$(sed -n 's/^owner:[[:space:]]*"\{0,1\}\(@[^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "${manifests[0]}" | head -n1)
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+
+      - name: Request the owner's review
+        if: steps.check.outputs.owner != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          OWNER: ${{ steps.check.outputs.owner }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          gh label create design --force >/dev/null 2>&1 || true
+          gh pr edit "$PR" --add-label design >/dev/null 2>&1 || true
+          reviewer="${OWNER#@}"
+          if [ "$reviewer" != "$AUTHOR" ]; then
+            gh pr edit "$PR" --add-reviewer "$reviewer" || echo "::warning::could not request review from $OWNER"
+          fi

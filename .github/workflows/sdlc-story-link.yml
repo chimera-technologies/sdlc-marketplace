@@ -1,0 +1,93 @@
+name: "SDLC Test: story link-back"
+
+# Reusable workflow of the sdlc plugin (workflow_call). On story PR merge or close: move the Jira story to Done (with the merge SHA) or comment.
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# Jira link-back for story PRs (branch story/<jira-key>-<name>): on merge,
+# moves the Jira story to Done with the merge SHA; on close without merge,
+# comments that it was closed. The plan/traceability check runs in pr.yml,
+# after the PR review gate. No model involved.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  HEAD_REF: ${{ github.head_ref }}
+  JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+  JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+
+jobs:
+  link:
+    if: github.event.action == 'closed' && startsWith(github.head_ref, 'story/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Update the Jira story
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+        run: |
+          set -euo pipefail
+          if [ -z "$JIRA_API_TOKEN" ]; then echo "::notice::Jira not configured; skipping."; exit 0; fi
+          [[ "$HEAD_REF" =~ ^story/([a-z][a-z0-9]*-[0-9]+)(-|$) ]] || exit 0
+          key=$(tr 'a-z' 'A-Z' <<<"${BASH_REMATCH[1]}")
+          jira() { curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" -H "Content-Type: application/json" "$@"; }
+          if [ "$MERGED" = "true" ]; then
+            msg="Story merged by @$MERGED_BY as $SHA; acceptance tests passed in CI. $PR_URL"
+          else
+            msg="Story PR closed without merge. See $PR_URL"
+          fi
+          jq -n --arg b "$msg" '{body:$b}' | jira -X POST --data @- "$JIRA_BASE_URL/rest/api/2/issue/$key/comment" >/dev/null
+          if [ "$MERGED" = "true" ]; then
+            id=$(jira "$JIRA_BASE_URL/rest/api/2/issue/$key/transitions" \
+                 | jq -r '[.transitions[] | select(.to.statusCategory.key == "done" or (.name | test("^done$"; "i")))][0].id // empty')
+            if [ -n "$id" ]; then
+              jq -n --arg id "$id" '{transition:{id:$id}}' | jira -X POST --data @- "$JIRA_BASE_URL/rest/api/2/issue/$key/transitions" >/dev/null
+              echo "Moved $key to Done"
+            else
+              echo "::warning::no Done transition available for $key"
+            fi
+          fi

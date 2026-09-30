@@ -1,0 +1,301 @@
+name: "SDLC PR review and Test"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Story PRs: PR review (conformance gate + advisory reviewers), then Test (traceability + the project's tests).
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# Every PR to main goes through two stages, in order:
+#   1. PR review (story PRs, before Test)
+#      review-gate -> sdlc:review-story: conformance with plan, spec, design
+#                     screens, REVIEW.md, CLAUDE.md and the security policy.
+#                     Fails on findings at or above .sdlc/review.json fail_on.
+#      advisory    -> each reviewer in .sdlc/review.json "advisory" (default:
+#                     Anthropic's code-review plugin); comments only, never blocks.
+#   2. Test (only after the review gate passes, or for non-story PRs)
+#      traceability -> the story's plan maps every acceptance criterion to a test
+#      e2e          -> the Playwright suite
+# Required checks on main: review-gate, traceability, e2e.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  BASE_BRANCH: ${{ inputs.base_branch }}
+  SDLC_PLUGIN_REPO: ${{ inputs.sdlc_repo }}
+  SDLC_PLUGIN_REF: ${{ inputs.sdlc_ref }}
+  PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
+  HEAD_REF: ${{ github.head_ref }}
+  PR: ${{ github.event.pull_request.number }}
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      story: ${{ steps.cfg.outputs.story }}
+      advisory: ${{ steps.cfg.outputs.advisory }}
+      fail_on: ${{ steps.cfg.outputs.fail_on }}
+      model: ${{ steps.cfg.outputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read .sdlc/review.json
+        id: cfg
+        env:
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -euo pipefail
+          story=false
+          if [[ "$HEAD_REF" == story/* ]] && [ "$DRAFT" != "true" ]; then story=true; fi
+          echo "story=$story" >> "$GITHUB_OUTPUT"
+          echo "fail_on=$(jq -r '.gate.fail_on // "high"' .sdlc/review.json)" >> "$GITHUB_OUTPUT"
+          echo "model=$(jq -r '.gate.model // "claude-sonnet-5"' .sdlc/review.json)" >> "$GITHUB_OUTPUT"
+          advisory=$(jq -c --arg repo "$GITHUB_REPOSITORY" --arg pr "$PR" \
+            '[.advisory[]? | .prompt |= (gsub("\\{repo\\}"; $repo) | gsub("\\{pr\\}"; $pr))]' .sdlc/review.json)
+          echo "advisory=$advisory" >> "$GITHUB_OUTPUT"
+          echo "Story PR: $story; advisory reviewers: $(jq -r 'map(.name) | join(", ")' <<<"$advisory")"
+
+  review-gate:
+    needs: config
+    if: needs.config.outputs.story == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SDLC_HEADLESS: "1"
+      SDLC_WRITE_ALLOW: ".sdlc-output/pr-review.json"
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out pinned sdlc plugin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SDLC_PLUGIN_REPO }}
+          ref: ${{ env.SDLC_PLUGIN_REF }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Conformance review (sdlc:review-story, headless)
+        continue-on-error: true   # a crashed review becomes "failed" and the gate below blocks
+        env:
+          MODEL: ${{ needs.config.outputs.model }}
+        run: |
+          set -euo pipefail
+          mkdir -p .sdlc-output
+          # Claude holds no GitHub or Jira token; it reads the repo and writes one JSON file.
+          claude -p "/sdlc:review-story mode=headless base=origin/$BASE_BRANCH" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --model "$MODEL" \
+            --max-turns 40 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Bash(git diff*),Bash(git log*),Bash(git show*)" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/review-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)"' || true
+
+      - name: Render and post the review
+        id: gate
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          FAIL_ON: ${{ needs.config.outputs.fail_on }}
+        run: |
+          set -uo pipefail
+          python3 .sdlc-plugin/plugins/sdlc/skills/review-spec/scripts/render_review.py \
+            .sdlc-output/pr-review.json --markdown "$RUNNER_TEMP/review.md" \
+            --title "Conformance review" --fail-on "$FAIL_ON" > "$RUNNER_TEMP/verdict.txt"
+          code=$?
+          verdict=$(cat "$RUNNER_TEMP/verdict.txt")
+          body="<!-- sdlc-review-gate -->"$'\n'"$(cat "$RUNNER_TEMP/review.md")"$'\n'"Gate: fails on \`$FAIL_ON\` or worse."
+          # One sticky comment per PR, updated on every push.
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+               --jq '[.[] | select(.body | startswith("<!-- sdlc-review-gate -->"))][0].id // empty')
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" >/dev/null
+          fi
+          for l in review:clean review:concerns review:failed; do gh label create "$l" --force >/dev/null 2>&1 || true; done
+          gh pr edit "$PR" --remove-label review:clean,review:concerns,review:failed >/dev/null 2>&1 || true
+          gh pr edit "$PR" --add-label "review:$verdict" >/dev/null 2>&1 || true
+          cat "$RUNNER_TEMP/review.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -ne 0 ]; then echo "::error::Review gate: findings at or above '$FAIL_ON' (or the review did not run). Fix them, then push."; exit 1; fi
+
+      - name: Upload review evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-review-${{ github.event.pull_request.number }}
+          path: |
+            ${{ runner.temp }}/review-transcript.jsonl
+            .sdlc-output/pr-review.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  advisory:
+    needs: config
+    if: needs.config.outputs.story == 'true' && needs.config.outputs.advisory != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true   # advisory reviewers never block
+    strategy:
+      fail-fast: false
+      matrix:
+        reviewer: ${{ fromJSON(needs.config.outputs.advisory) }}
+    name: advisory (${{ matrix.reviewer.name }})
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # sdlc-bot App token: comments post as the bot, and no OIDC exchange is needed.
+          github_token: ${{ steps.app.outputs.token }}
+          plugin_marketplaces: ${{ matrix.reviewer.marketplace || '' }}
+          plugins: ${{ matrix.reviewer.plugin || '' }}
+          prompt: ${{ matrix.reviewer.prompt }}
+          claude_args: >-
+            --max-turns 40
+            ${{ matrix.reviewer.allowed_tools && format('--allowedTools "{0}"', matrix.reviewer.allowed_tools) || '' }}
+
+  traceability:
+    needs: [config, review-gate]
+    if: always() && needs.config.outputs.story == 'true' && needs.review-gate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mint short-lived GitHub App token (plugin read)
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+
+      - name: Check out pinned sdlc plugin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SDLC_PLUGIN_REPO }}
+          ref: ${{ env.SDLC_PLUGIN_REF }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Validate plan and acceptance-test traceability
+        run: |
+          set -euo pipefail
+          [[ "$HEAD_REF" =~ ^story/([a-z][a-z0-9]*-[0-9]+)(-|$) ]] || { echo "::error::branch $HEAD_REF is not story/<jira-key>-<name>"; exit 1; }
+          key=$(tr 'a-z' 'A-Z' <<<"${BASH_REMATCH[1]}")
+          plan=$(grep -lx "jira: $key" plans/*.md 2>/dev/null | head -n1 || true)
+          [ -n "$plan" ] || { echo "::error::no plan with 'jira: $key' in plans/; build stories with /sdlc:build-story"; exit 1; }
+          echo "Story $key, plan $plan"
+          python3 "$PLUGIN_DIR/skills/build-story/scripts/validate_plan.py" --check-tests "$plan"
+
+  e2e:
+    needs: [config, review-gate]
+    # Story PRs: only after the review gate passes. Other PRs (design, spec, config): always.
+    if: always() && (needs.review-gate.result == 'success' || (needs.config.outputs.story != 'true' && needs.config.result == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Set up the project's stack (.sdlc/build.yaml)
+        id: stack
+        uses: ./.sdlc-plugin/.github/actions/setup-stack
+        with:
+          require-tests: "true"
+
+      - name: Run the project's tests (test_command)
+        env:
+          CMD: ${{ steps.stack.outputs.test_command }}
+        run: bash -euo pipefail -c "$CMD"
+
+      - name: Upload test report
+        if: always() && steps.stack.outputs.report_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ github.run_id }}-${{ github.job }}
+          path: ${{ steps.stack.outputs.report_path }}
+          if-no-files-found: ignore
+          retention-days: 30

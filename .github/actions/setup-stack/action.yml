@@ -1,0 +1,72 @@
+name: SDLC setup stack
+description: >-
+  Install the toolchains declared in the project's .sdlc/build.yaml
+  (node, python, java, dotnet, go) with the official setup actions, run its
+  setup_command and install_command, and expose its test commands. The
+  stack is whatever the spec's tech lead decided; nothing here is fixed.
+  Used by the sdlc reusable workflows after they check out the plugin into
+  .sdlc-plugin/ (uses: ./.sdlc-plugin/.github/actions/setup-stack).
+
+inputs:
+  require-tests:
+    description: "Fail if .sdlc/build.yaml has no test_command"
+    default: "false"
+
+outputs:
+  test_command:
+    description: "The project's full test command"
+    value: ${{ steps.stack.outputs.test_command }}
+  test_file_command:
+    description: "The project's single-file test command ({file} placeholder)"
+    value: ${{ steps.stack.outputs.test_file_command }}
+  report_path:
+    description: "Test report folder to upload (report_path), or empty"
+    value: ${{ steps.stack.outputs.report_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read .sdlc/build.yaml
+      id: stack
+      shell: bash
+      run: python3 "${{ github.action_path }}/stack.py" ${{ inputs.require-tests == 'true' && '--require-tests' || '' }}
+
+    - if: steps.stack.outputs.node != ''
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ steps.stack.outputs.node }}
+
+    - if: steps.stack.outputs.python != ''
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ steps.stack.outputs.python }}
+
+    - if: steps.stack.outputs.java != ''
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ steps.stack.outputs.java }}
+        distribution: ${{ steps.stack.outputs.java_distribution }}
+
+    - if: steps.stack.outputs.dotnet != ''
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ steps.stack.outputs.dotnet }}
+
+    - if: steps.stack.outputs.go != ''
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ steps.stack.outputs.go }}
+
+    - name: Setup command
+      if: steps.stack.outputs.setup_command != ''
+      shell: bash
+      env:
+        CMD: ${{ steps.stack.outputs.setup_command }}
+      run: bash -euo pipefail -c "$CMD"
+
+    - name: Install command
+      if: steps.stack.outputs.install_command != ''
+      shell: bash
+      env:
+        CMD: ${{ steps.stack.outputs.install_command }}
+      run: bash -euo pipefail -c "$CMD"

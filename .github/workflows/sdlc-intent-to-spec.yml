@@ -1,0 +1,309 @@
+name: "SDLC Design: intent to spec"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Plan -> Design: draft specs/<slug>.md for each merged intent (sdlc:write-spec, sdlc:review-spec).
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# Plan -> Design boundary. Fires once an owner merges an intent into main.
+# No human has to notice or kick this off; the owner's first touch on the
+# spec is its review.
+#
+# 1. sdlc:write-spec drafts specs/<slug>.md (headless).
+# 2. validate_spec.py checks it (draft PR if invalid).
+# 3. sdlc:review-spec pre-screens it in a fresh Claude session; the findings
+#    go in the PR body (a screen, not an approval).
+# 4. The PR requests the owner, plus the tech lead when risk is high.
+# Merging the spec PR creates the Jira stories (spec-to-stories.yml).
+#
+# Runs the Claude CLI directly: anthropics/claude-code-action does not
+# support the push event.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+      model:
+        description: "Claude model for this stage"
+        type: string
+        default: claude-opus-5-5
+      intent_file:
+        description: "Re-run for one merged intent (intent/<slug>.md); empty = intents changed in this push"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
+  VALIDATE: .sdlc-plugin/plugins/sdlc/skills/write-intent/scripts/validate_intent.py
+  VALIDATE_SPEC: .sdlc-plugin/plugins/sdlc/skills/write-spec/scripts/validate_spec.py
+  RENDER_REVIEW: .sdlc-plugin/plugins/sdlc/skills/review-spec/scripts/render_review.py
+  MODEL: ${{ inputs.model }}
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      files: ${{ steps.changed.outputs.files }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: List intents added or modified in this push
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          MANUAL_FILE: ${{ inputs.intent_file }}
+        run: |
+          set -euo pipefail
+          if [ -n "$MANUAL_FILE" ]; then
+            [[ "$MANUAL_FILE" =~ ^intent/[a-z0-9-]+\.md$ ]] || { echo "::error::intent_file must look like intent/<slug>.md"; exit 1; }
+            [ -f "$MANUAL_FILE" ] || { echo "::error::$MANUAL_FILE is not on main"; exit 1; }
+            files=$(jq -cn --arg f "$MANUAL_FILE" '[$f]')
+            echo "files=$files" >> "$GITHUB_OUTPUT"; echo "Intents to spec: $files"; exit 0
+          fi
+          # Whole push range, so multi-commit pushes are covered; fall back to
+          # the parent on a first push. Deleted intents are ignored.
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            BEFORE="$AFTER^"
+          fi
+          files=$(git diff --name-only --diff-filter=AMR "$BEFORE" "$AFTER" -- 'intent/*.md' \
+                  | jq -R . | jq -sc .)
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          echo "Intents to spec: $files"
+
+  draft-spec:
+    needs: detect
+    if: needs.detect.outputs.files != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        file: ${{ fromJSON(needs.detect.outputs.files) }}
+    concurrency:
+      group: spec-${{ matrix.file }}
+      cancel-in-progress: false
+    env:
+      INTENT_FILE: ${{ matrix.file }}
+      SDLC_HEADLESS: "1"
+      # POC: Claude subscription token from `claude setup-token`. For shared
+      # or production use, set ANTHROPIC_API_KEY instead.
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Read intent metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          python3 "$VALIDATE" --json "$INTENT_FILE" > "$RUNNER_TEMP/intent.json"   # merged intents must still be valid
+          slug=$(jq -r .id "$RUNNER_TEMP/intent.json")
+          [[ "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "::error::bad slug"; exit 1; }
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+          mkdir -p specs .sdlc-output
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Draft spec with write-spec skill (headless)
+        env:
+          SDLC_WRITE_ALLOW: "specs/"
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          set -euo pipefail
+          # Claude holds no GitHub or Jira token; the App token is only used
+          # by the PR step below.
+          claude -p "/sdlc:write-spec mode=headless intent=$INTENT_FILE" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --model "$MODEL" \
+            --max-turns 60 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Edit,Bash(python3 *validate_spec.py*)" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/spec-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/spec-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+          [ -s "specs/$SLUG.md" ] || { echo "::error::Claude did not write specs/$SLUG.md"; exit 1; }
+
+      - name: Validate spec
+        id: check
+        env:
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          set -euo pipefail
+          f="specs/$SLUG.md"
+          if python3 "$VALIDATE_SPEC" --owners .sdlc/owners.yaml "$f" 2> "$RUNNER_TEMP/validation.txt"; then
+            valid=true; else valid=false; fi
+          cat "$RUNNER_TEMP/validation.txt"
+          python3 "$VALIDATE_SPEC" --json "$f" > "$RUNNER_TEMP/spec.json" 2>/dev/null || echo '{}' > "$RUNNER_TEMP/spec.json"
+          owner=$(jq -r '.owner // ""' "$RUNNER_TEMP/spec.json")
+          lead=$(jq -r '.tech_lead // ""' "$RUNNER_TEMP/spec.json")
+          risk=$(jq -r '.risk // "high"' "$RUNNER_TEMP/spec.json")
+          # Owner always; tech lead too when risk is high. Users and teams separately.
+          people=("$owner")
+          if [ "$risk" = "high" ] && [ -n "$lead" ]; then people+=("$lead"); fi
+          reviewers=""; team_reviewers=""
+          for who in "${people[@]}"; do
+            [ -z "$who" ] && continue
+            if [[ "$who" == @*/* ]]; then team_reviewers="${team_reviewers:+$team_reviewers,}${who#*/}"
+            else reviewers="${reviewers:+$reviewers,}${who#@}"; fi
+          done
+          reviewers=$(tr ',' '\n' <<<"$reviewers" | sort -u | paste -sd, -)
+          team_reviewers=$(tr ',' '\n' <<<"$team_reviewers" | sort -u | paste -sd, -)
+          {
+            echo "valid=$valid"; echo "risk=$risk"; echo "owner=$owner"; echo "tech_lead=$lead"
+            echo "record_id=$(jq -r '.record_id // "none"' "$RUNNER_TEMP/spec.json")"
+            echo "reviewers=$reviewers"; echo "team_reviewers=$team_reviewers"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Adversarial pre-screen with review-spec skill (headless)
+        continue-on-error: true   # a failed review becomes "review:failed", not a failed run
+        env:
+          SDLC_WRITE_ALLOW: ".sdlc-output/spec-review.json"
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          set -euo pipefail
+          # Fresh Claude session: it sees only the files, not the author's reasoning.
+          claude -p "/sdlc:review-spec mode=headless spec=specs/$SLUG.md" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --model "$MODEL" \
+            --max-turns 40 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/review-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Build PR body
+        id: body
+        env:
+          SLUG: ${{ steps.meta.outputs.slug }}
+          VALID: ${{ steps.check.outputs.valid }}
+          RISK: ${{ steps.check.outputs.risk }}
+          OWNER: ${{ steps.check.outputs.owner }}
+          LEAD: ${{ steps.check.outputs.tech_lead }}
+          RECORD: ${{ steps.check.outputs.record_id }}
+        run: |
+          set -euo pipefail
+          verdict=$(python3 "$RENDER_REVIEW" .sdlc-output/spec-review.json --markdown "$RUNNER_TEMP/review.md")
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          stories=$(grep -c '^### S[0-9]\+:' "specs/$SLUG.md" || true)
+          {
+            echo "Spec for \`$INTENT_FILE\` (record \`$RECORD\`, risk \`$RISK\`, $stories stories)."
+            echo "Merge to accept the design: the stories are then created in Jira under \`$RECORD\`. Close with a reason to reject."
+            echo
+            if [ "$VALID" = "false" ]; then
+              echo "> [!WARNING]"; echo "> Validation failed; opened as draft. Fix before merging:"
+              echo '```'; cat "$RUNNER_TEMP/validation.txt"; echo '```'; echo
+            fi
+            cat "$RUNNER_TEMP/review.md"; echo
+            echo "### Review checklist"
+            echo "- [ ] Solves the problem stated in the intent ($OWNER)"
+            echo "- [ ] Tech stack decision is right (${LEAD:-tech lead})"
+            echo "- [ ] Open questions answered or carried forward to the right person"
+            echo "- [ ] Areas of concern decided with the named owner"
+            echo "- [ ] Pre-screen findings resolved or consciously accepted"
+            echo "- [ ] Stories are the right size to build and test"
+            if [ "$RISK" = "high" ]; then echo "- [ ] Risk \`high\`: tech lead has approved"; fi
+            echo
+            echo "<details><summary>Evidence</summary>"
+            echo
+            echo "- Intent: \`$INTENT_FILE\` @ \`$GITHUB_SHA\`"
+            echo "- Skills: sdlc:write-spec, sdlc:review-spec @ \`${{ inputs.sdlc_repo }}@${{ inputs.sdlc_ref }}\`"
+            echo "- Model: $MODEL"
+            echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (transcript artifacts)"
+            echo "</details>"
+          } > "$RUNNER_TEMP/pr-body.md"
+
+      - name: Upload session transcripts (evidence)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-transcripts-${{ steps.meta.outputs.slug }}
+          path: |
+            ${{ runner.temp }}/spec-transcript.jsonl
+            ${{ runner.temp }}/review-transcript.jsonl
+            .sdlc-output/spec-review.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Open pull request with spec
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+          branch: spec/${{ steps.meta.outputs.slug }}
+          base: ${{ inputs.base_branch }}
+          add-paths: specs/${{ steps.meta.outputs.slug }}.md
+          commit-message: |
+            spec: ${{ steps.meta.outputs.slug }}
+
+            Generated from ${{ env.INTENT_FILE }} @ ${{ github.sha }}
+            Record: ${{ steps.check.outputs.record_id }}
+          title: "spec: ${{ steps.meta.outputs.slug }}"
+          body-path: ${{ runner.temp }}/pr-body.md
+          draft: ${{ steps.check.outputs.valid == 'false' }}
+          labels: |
+            spec
+            risk:${{ steps.check.outputs.risk }}
+            review:${{ steps.body.outputs.verdict }}
+          reviewers: ${{ steps.check.outputs.reviewers }}
+          team-reviewers: ${{ steps.check.outputs.team_reviewers }}

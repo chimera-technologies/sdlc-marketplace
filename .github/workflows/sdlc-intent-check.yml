@@ -1,0 +1,189 @@
+name: "SDLC Plan: intent check"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Plan gate: validate intent PRs, route the owner, write the outcome to Jira.
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# Deterministic gate on every intent PR (human-written or headless):
+#   validate -> structure, frontmatter, owner and record_id are machine-readable
+#               for Design; mark this job a required status check.
+#   route    -> requests review from the owner named in the frontmatter and
+#               labels source/risk so owners can filter their triage queue.
+#   link     -> on merge or close, writes the outcome and merge SHA back to
+#               the Jira record (linkage system of record). No model involved.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  VALIDATE: .sdlc-plugin/plugins/sdlc/skills/write-intent/scripts/validate_intent.py
+  JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+  JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+
+jobs:
+  validate:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mint short-lived GitHub App token (reviewer requests)
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # merge commit + base, so HEAD^1 is the base tip
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Validate changed intents
+        id: check
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git diff --name-only --diff-filter=AMR HEAD^1 HEAD -- 'intent/*.md')
+          if [ "${#files[@]}" -eq 0 ]; then echo "No intent files added or modified."; exit 0; fi
+          [ "${#files[@]}" -gt 1 ] && echo "::warning::${#files[@]} intents in one PR; one intent per PR keeps review and Design runs clean."
+          python3 "$VALIDATE" --owners .sdlc/owners.yaml "${files[@]}"
+
+          # record_id must be unique across all intents
+          dupes=$(grep -hx 'record_id: [A-Z][A-Z0-9]*-[0-9]*' intent/*.md | sort | uniq -d || true)
+          if [ -n "$dupes" ]; then echo "::error::record_id used by more than one intent: $dupes"; exit 1; fi
+          dupes=$(grep -hx 'fingerprint: [a-z0-9-]*' intent/*.md | grep -vx 'fingerprint: none' | sort | uniq -d || true)
+          if [ -n "$dupes" ]; then echo "::error::fingerprint used by more than one intent: $dupes"; exit 1; fi
+
+          # Revisions of an already-accepted intent are tracked (lagging indicator)
+          revised=$(git diff --name-only --diff-filter=M HEAD^1 HEAD -- 'intent/*.md' | tr '\n' ' ')
+          echo "revised=$revised" >> "$GITHUB_OUTPUT"
+          python3 "$VALIDATE" --json "${files[0]}" > fm.json
+          echo "owner=$(jq -r .owner fm.json)" >> "$GITHUB_OUTPUT"
+          echo "risk=$(jq -r .risk fm.json)" >> "$GITHUB_OUTPUT"
+          echo "source=$(jq -r .source fm.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Route review and label
+        if: steps.check.outputs.owner != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # GITHUB_TOKEN cannot request team reviewers; the App (Members: read) can.
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          PR: ${{ github.event.pull_request.number }}
+          OWNER: ${{ steps.check.outputs.owner }}
+          RISK: ${{ steps.check.outputs.risk }}
+          SRC: ${{ steps.check.outputs.source }}
+          REVISED: ${{ steps.check.outputs.revised }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          for l in intent "source:$SRC" "risk:$RISK" ${REVISED:+intent-revision}; do
+            gh label create "$l" --force >/dev/null 2>&1 || true
+          done
+          gh pr edit "$PR" --add-label "intent,source:$SRC,risk:$RISK${REVISED:+,intent-revision}"
+          for l in risk:low risk:medium risk:high; do
+            [ "$l" != "risk:$RISK" ] && gh pr edit "$PR" --remove-label "$l" >/dev/null 2>&1 || true
+          done
+          reviewer="${OWNER#@}"
+          if [ "$reviewer" != "$AUTHOR" ]; then
+            GH_TOKEN="$APP_TOKEN" gh pr edit "$PR" --add-reviewer "$reviewer" || echo "::warning::could not request review from $OWNER"
+          fi
+
+  link-back:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merged && github.event.pull_request.merge_commit_sha || github.event.pull_request.head.sha }}
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Write outcome to Jira
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+        run: |
+          set -euo pipefail
+          if [ -z "$JIRA_API_TOKEN" ]; then echo "Jira not configured; skipping."; exit 0; fi
+          mapfile -t files < <(gh pr view "$PR" --json files -q '.files[].path' | grep '^intent/.*\.md$' || true)
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || continue
+            rid=$(python3 "$VALIDATE" --json "$f" 2>/dev/null | jq -r '.record_id // "none"')
+            [ "$rid" = "none" ] && continue
+            if [ "$MERGED" = "true" ]; then
+              msg="Intent ACCEPTED by @$MERGED_BY and merged as $SHA ($f). Design stage started. $PR_URL"
+            else
+              msg="Intent CLOSED without merge (rejected or superseded). See reason in $PR_URL"
+            fi
+            jq -n --arg b "$msg" '{body:$b}' | curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+              -H "Content-Type: application/json" -X POST --data @- \
+              "$JIRA_BASE_URL/rest/api/2/issue/$rid/comment" >/dev/null
+            echo "Linked $f -> $rid"
+          done

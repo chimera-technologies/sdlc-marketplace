@@ -1,0 +1,129 @@
+name: "SDLC Design: spec to stories"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Design -> Build: create one Jira story per Work breakdown entry of each merged spec.
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# Design -> Build boundary. Fires once an owner merges a spec into main and
+# creates one Jira story per "### S<n>:" entry in its Work breakdown, under
+# the intent's Epic (or linked to its record if that is not an Epic).
+# Deterministic: no model involved. Idempotent: re-runs and spec revisions
+# only add stories that don't exist yet.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+      spec_file:
+        description: "Re-run for one merged spec (specs/<slug>.md); empty = specs changed in this push"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  VALIDATE_SPEC: .sdlc-plugin/plugins/sdlc/skills/write-spec/scripts/validate_spec.py
+  SPEC_STORIES: .sdlc-plugin/plugins/sdlc/skills/write-spec/scripts/spec_stories.py
+  JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+  JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+
+jobs:
+  stories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Create stories in Jira
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          MANUAL_FILE: ${{ inputs.spec_file }}
+        run: |
+          set -euo pipefail
+          if [ -z "$JIRA_API_TOKEN" ]; then echo "::notice::Jira not configured; skipping."; exit 0; fi
+          if [ -n "$MANUAL_FILE" ]; then
+            [[ "$MANUAL_FILE" =~ ^specs/[a-z0-9-]+\.md$ ]] || { echo "::error::spec_file must look like specs/<slug>.md"; exit 1; }
+            files=("$MANUAL_FILE")
+          else
+            if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+              BEFORE="$AFTER^"
+            fi
+            mapfile -t files < <(git diff --name-only --diff-filter=AMR "$BEFORE" "$AFTER" -- 'specs/*.md')
+          fi
+          echo "### Stories from specs" >> "$GITHUB_STEP_SUMMARY"
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || { echo "::error::$f is not on main"; exit 1; }
+            python3 "$VALIDATE_SPEC" --owners .sdlc/owners.yaml "$f"   # never create stories from an invalid spec
+            rid=$(python3 "$VALIDATE_SPEC" --json "$f" | jq -r '.record_id // "none"')
+            if [ "$rid" = "none" ]; then
+              echo "::notice::$f has no record_id (no Jira record); no stories created."
+              echo "- \`$f\`: no Jira record, skipped" >> "$GITHUB_STEP_SUMMARY"; continue
+            fi
+            python3 "$SPEC_STORIES" "$f" --create > "$RUNNER_TEMP/result.json"
+            cat "$RUNNER_TEMP/result.json"
+            created=$(jq -r '.created | length' "$RUNNER_TEMP/result.json")
+            existing=$(jq -r '.existing | length' "$RUNNER_TEMP/result.json")
+            echo "- \`$f\` -> $rid: $created created, $existing already existed" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$created" -gt 0 ]; then
+              list=$(jq -r '.created[] | "- \(.key) \(.summary)"' "$RUNNER_TEMP/result.json")
+              msg=$(printf 'Stories created from %s:\n%s\n\nSpec: %s' "$f" "$list" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$AFTER/$f")
+              jq -n --arg b "$msg" '{body:$b}' | curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+                -H "Content-Type: application/json" -X POST --data @- \
+                "$JIRA_BASE_URL/rest/api/2/issue/$rid/comment" >/dev/null
+            fi
+          done
