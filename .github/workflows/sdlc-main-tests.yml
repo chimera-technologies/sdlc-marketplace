@@ -76,11 +76,14 @@ jobs:
         id: stack
         uses: ./.sdlc-plugin/.github/actions/setup-stack
         # No require-tests: main has no stack until the first spec's decision
-        # is recorded, and that must not turn main red.
+        # is recorded, and no code until the first story merges; neither
+        # must turn main red.
+        with:
+          skip-without-code: "true"
 
-      - name: No stack recorded yet
+      - name: Nothing to test yet
         if: steps.stack.outputs.test_command == ''
-        run: echo "::notice::No test_command in .sdlc/build.yaml yet; tests skipped. Record the stack with /sdlc:init stack=specs/<slug>.md."
+        run: echo "::notice::Tests skipped. No test_command in .sdlc/build.yaml yet, or none of its code_paths exist (the first story creates them)."
 
       - name: Run the project's tests (test_command)
         if: steps.stack.outputs.test_command != ''

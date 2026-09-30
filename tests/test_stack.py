@@ -68,6 +68,26 @@ class StackTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("no test_command", r.stderr)
 
+    def test_skip_without_code(self):
+        # Stack recorded, but the first story has not scaffolded anything yet.
+        root = self.repo("code_paths: [src/, tests/]\ntoolchains: [node@22]\n"
+                         "install_command: npm ci\ntest_command: npm test\n")
+        run = lambda *a: subprocess.run([sys.executable, str(STACK), "--root", str(root), *a],
+                                        capture_output=True, text=True, env={**os.environ, "GITHUB_OUTPUT": ""})
+        r = run("--skip-without-code")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("install_command=\n", r.stdout)
+        self.assertIn("test_command=\n", r.stdout)
+        self.assertIn("node=\n", r.stdout)
+        # Story PRs (require-tests) always install and test.
+        r = run("--skip-without-code", "--require-tests")
+        self.assertIn("test_command=npm test", r.stdout)
+        # Once code exists, the stack is used.
+        (root / "src").mkdir()
+        r = run("--skip-without-code")
+        self.assertIn("install_command=npm ci", r.stdout)
+        self.assertIn("node=22", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

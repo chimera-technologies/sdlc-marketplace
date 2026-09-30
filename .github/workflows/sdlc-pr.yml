@@ -286,13 +286,14 @@ jobs:
         id: stack
         uses: ./.sdlc-plugin/.github/actions/setup-stack
         with:
-          # Story PRs need a stack; intent, spec and design PRs come before
-          # the spec has decided one.
+          # Story PRs need a stack; intent, spec, design and stack PRs can
+          # come before the spec decided one or the first story scaffolded it.
           require-tests: ${{ needs.config.outputs.story == 'true' && 'true' || 'false' }}
+          skip-without-code: ${{ needs.config.outputs.story == 'true' && 'false' || 'true' }}
 
-      - name: No stack recorded yet
+      - name: Nothing to test yet
         if: steps.stack.outputs.test_command == ''
-        run: echo "::notice::No test_command in .sdlc/build.yaml yet; tests skipped. Record the stack with /sdlc:init stack=specs/<slug>.md."
+        run: echo "::notice::Tests skipped. No test_command in .sdlc/build.yaml yet, or none of its code_paths exist (the first story creates them)."
 
       - name: Run the project's tests (test_command)
         if: steps.stack.outputs.test_command != ''

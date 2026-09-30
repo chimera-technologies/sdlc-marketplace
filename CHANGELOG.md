@@ -4,6 +4,14 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.6.3 (2026-09-30)
+
+- The Test stage also skips (with a notice) while none of `.sdlc/build.yaml`'s
+  `code_paths` exist, so recording the stack before the first story
+  scaffolds the project no longer fails the stack PR or `main` (for example
+  `npm ci` with no `package.json`). New `setup-stack` input
+  `skip-without-code`. Story PRs still always install and test.
+
 ## v0.6.2 (2026-09-30)
 
 - A project whose stack is still "decided by the spec" no longer fails the
