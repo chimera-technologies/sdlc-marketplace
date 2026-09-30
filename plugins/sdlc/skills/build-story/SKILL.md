@@ -38,7 +38,9 @@ Run this as one command from the repo root:
 (code knowledge graph, so you read less code) and **Ponytail** (minimal-code
 rules), as pinned in `.sdlc/build.yaml`.
 
-- Exit 0: continue.
+- Exit 0: continue. A `graphify: WARNING no code ... yet` line is normal
+  for a first story (nothing to index); skip the graph queries in Step 2
+  and read the spec and design instead.
 - Exit 3: stop and show the person the `ACTION NEEDED` line exactly (usually
   `/plugin install ponytail@ponytail`, then `/clear`). Do not continue in
   this session.
@@ -129,7 +131,9 @@ visible differences in layout, copy and colours.
 Then run, once each:
 - the full suite once with `test_command`;
 - `python "${CLAUDE_SKILL_DIR}/scripts/validate_plan.py" --check-tests plans/<id>.md`;
-- `graphify update .` (keeps the graph current; local, no tokens).
+- the preflight again (`python "${CLAUDE_SKILL_DIR}/scripts/build_preflight.py"`):
+  it updates the graph, or builds it for the first time when this story
+  created the first code (local, no tokens).
 
 ## Step 6: independent verification
 

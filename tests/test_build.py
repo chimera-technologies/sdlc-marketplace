@@ -295,6 +295,13 @@ class BuildGuardTest(Repo):
         subprocess.run(["git", "checkout", "-q", "-b", "story/clm-483-renamed"], cwd=self.root, check=True)
         self.assertEqual(bg.check(self.root, "src/app.js"), [])
 
+    def test_no_code_marker_stands_in_for_the_graph(self):
+        self.ready()
+        (self.root / "graphify-out" / "graph.json").unlink()
+        self.assertTrue(any("No Graphify graph" in p for p in bg.check(self.root, "src/app.js")))
+        bg.no_code_marker(self.root).write_text("x", encoding="utf-8")
+        self.assertEqual(bg.check(self.root, "src/app.js"), [])
+
     def test_allowed_when_ready(self):
         self.ready()
         self.assertEqual(bg.check(self.root, "src/app.js"), [])
@@ -311,6 +318,55 @@ class BuildGuardTest(Repo):
         r = subprocess.run([sys.executable, str(PLUGIN / "hooks" / "build_guard.py")], input=event,
                            capture_output=True, text=True, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
+
+
+class PreflightNoCodeTest(unittest.TestCase):
+    """A first story: nothing to index yet must not stop the build."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name).resolve()
+        self.cfg = {"code_paths": ["src/", "tests/", "index.html"], "graphify_version": "0.9.71"}
+        self.calls = []
+
+    def fake_run(self, cmd, cwd, timeout=600):
+        self.calls.append(cmd[3:] if cmd[1:3] == ["-m", "graphify"] else cmd)
+        if cmd[-1] == "--version":
+            return subprocess.CompletedProcess(cmd, 0, "graphify 0.9.71\n", "")
+        if "extract" in cmd:
+            (self.root / "graphify-out").mkdir(exist_ok=True)
+            (self.root / "graphify-out" / "graph.json").write_text("{}", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, "12 nodes, 30 edges\n", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    def graphify(self):
+        report = []
+        with mock.patch.object(bp, "run", self.fake_run):
+            bp.step_graphify(self.root, self.cfg, report)
+        return report
+
+    def test_has_code(self):
+        self.assertFalse(bp.has_code(self.root, self.cfg))
+        (self.root / "src").mkdir()
+        self.assertFalse(bp.has_code(self.root, self.cfg), "an empty folder is not code")
+        (self.root / "index.html").write_text("<html></html>", encoding="utf-8")
+        self.assertTrue(bp.has_code(self.root, self.cfg))
+
+    def test_no_code_warns_and_continues(self):
+        report = self.graphify()
+        self.assertTrue(any("WARNING no code" in line for line in report), report)
+        self.assertTrue(bg.no_code_marker(self.root).is_file())
+        self.assertFalse(any("extract" in c for c in self.calls), "must not try to index nothing")
+
+    def test_graph_replaces_the_marker_once_code_exists(self):
+        self.graphify()
+        (self.root / "src").mkdir()
+        (self.root / "src" / "main.ts").write_text("export {}\n", encoding="utf-8")
+        report = self.graphify()
+        self.assertTrue((self.root / "graphify-out" / "graph.json").is_file())
+        self.assertFalse(bg.no_code_marker(self.root).is_file())
+        self.assertTrue(any("12 nodes" in line for line in report), report)
 
 
 class PreflightLogicTest(unittest.TestCase):

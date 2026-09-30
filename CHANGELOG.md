@@ -4,6 +4,21 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.8.1 (2026-09-30)
+
+- The Build preflight no longer fails on a first story: when none of
+  `.sdlc/build.yaml`'s `code_paths` holds a file yet, it warns, skips the
+  Graphify graph, and leaves `graphify-out/NO-CODE-YET`, which the build
+  guard accepts in place of the graph. The next preflight (build-story
+  re-runs it after implementing) builds the real graph and removes the
+  marker.
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.8.1`. A first story that stopped at the preflight
+  can then be re-run as it was (`/sdlc:build-story S1`, or re-run the
+  automatic Build: Actions > SDLC push > rerun `build`).
+
 ## v0.8.0 (2026-09-30)
 
 Build is now automatic, one story at a time, with a plan PR before any code.

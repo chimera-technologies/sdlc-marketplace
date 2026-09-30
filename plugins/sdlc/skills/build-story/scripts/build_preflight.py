@@ -9,7 +9,9 @@ skill does this in Step 0; the build guard hook blocks code until it has):
 Reads .sdlc/build.yaml for the pinned versions. Idempotent:
   1. Graphify: installs `graphifyy==<graphify_version>` with pip if missing
      or a different version; builds or updates graphify-out/graph.json
-     (code only: local tree-sitter parsing, no LLM, no tokens); runs
+     (code only: local tree-sitter parsing, no LLM, no tokens). With no code
+     under code_paths yet (a first story), it warns, writes the marker
+     graphify-out/NO-CODE-YET instead, and continues; runs
      `graphify claude install` once, then moves its machine-specific hooks
      from the shared .claude/settings.json into .claude/settings.local.json.
   2. Ponytail: declares the marketplace (pinned to <ponytail_ref>) and
@@ -137,6 +139,15 @@ def ensure_gitignore(text, lines):
 
 # ------------------------------------------------------------- the steps
 
+def has_code(project, cfg):
+    """True if any code_path is a file, or a folder with at least one file in it."""
+    for rel in cfg.get("code_paths") or []:
+        path = Path(project) / rel.strip("/")
+        if path.is_file() or (path.is_dir() and any(p.is_file() for p in path.rglob("*"))):
+            return True
+    return False
+
+
 def step_graphify(project, cfg, report):
     version = cfg.get("graphify_version", "")
     got = run(graphify_cmd("--version"), project, 60)
@@ -155,6 +166,16 @@ def step_graphify(project, cfg, report):
         report.append(f"graphify: {installed} already installed")
 
     graph = Path(project) / "graphify-out" / "graph.json"
+    marker = guard.no_code_marker(project)
+    if not has_code(project, cfg):
+        # The first story creates the code: there is nothing to index yet. The
+        # marker lets the build guard allow this session's writes; the next
+        # preflight (after code exists) builds the real graph.
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        write_lf(marker, "No code under code_paths when the preflight ran; the next preflight builds the graph.\n")
+        report.append(f"graphify: WARNING no code under {', '.join(cfg['code_paths'])} yet, so no graph; "
+                      "continuing (re-run the preflight once the story has code)")
+        return
     args = ("update", ".") if graph.is_file() else ("extract", ".", "--code-only")
     res = run(graphify_cmd(*args), project)
     if args[0] == "update" and res.returncode != 0:
@@ -163,6 +184,8 @@ def step_graphify(project, cfg, report):
         res = run(graphify_cmd(*args), project)
     if res.returncode != 0 or not graph.is_file():
         raise SystemExit(f"graphify {' '.join(args)} failed:\n{(res.stderr or res.stdout)[-1500:]}")
+    if marker.is_file():
+        marker.unlink()
     m = re.search(r"(\d+) nodes, (\d+) edges", res.stdout + res.stderr)
     report.append(f"graphify: graph {'updated' if args[0] == 'update' else 'built'}"
                   + (f" ({m.group(1)} nodes, {m.group(2)} edges)" if m else ""))
