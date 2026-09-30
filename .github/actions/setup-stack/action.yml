@@ -11,6 +11,9 @@ inputs:
   require-tests:
     description: "Fail if .sdlc/build.yaml has no test_command"
     default: "false"
+  skip-without-code:
+    description: "Install and test nothing if none of build.yaml's code_paths exist yet (ignored with require-tests)"
+    default: "false"
 
 outputs:
   test_command:
@@ -29,7 +32,7 @@ runs:
     - name: Read .sdlc/build.yaml
       id: stack
       shell: bash
-      run: python3 "${{ github.action_path }}/stack.py" ${{ inputs.require-tests == 'true' && '--require-tests' || '' }}
+      run: python3 "${{ github.action_path }}/stack.py" ${{ inputs.require-tests == 'true' && '--require-tests' || '' }} ${{ inputs.skip-without-code == 'true' && '--skip-without-code' || '' }}
 
     - if: steps.stack.outputs.node != ''
       uses: actions/setup-node@v4
