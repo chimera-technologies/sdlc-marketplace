@@ -56,6 +56,7 @@ on the marketplace repo (or someone who has it).
 ## Upgrading
 
 `/sdlc:init upgrade=vX.Y.Z` (or `init_project.py --upgrade vX.Y.Z`) moves
-every caller and the plugin pin in one PR. Read the marketplace release
-notes for anything new to configure. `init_project.py --check` reports any
+every caller and the plugin pin in one PR. Read the marketplace's
+[CHANGELOG.md](../CHANGELOG.md) (its **Upgrading** steps) for anything new to
+configure. `init_project.py --check` reports any
 drift from what init generates.

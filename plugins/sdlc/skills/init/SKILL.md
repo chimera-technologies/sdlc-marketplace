@@ -86,7 +86,7 @@ After a spec's Technology and architecture decision is accepted:
 
 1. `git checkout -b sdlc/upgrade-<tag>`, then
    `python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --upgrade <tag>`.
-2. Read the marketplace's release notes for the versions in between and
+2. Read the marketplace's `CHANGELOG.md` for the versions in between and
    tell the person anything that needs action (new secrets, new checks).
 3. Commit the files it listed, push, open a PR. Merging moves every stage to
    the new tag at once.

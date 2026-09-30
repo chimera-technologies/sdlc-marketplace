@@ -76,8 +76,9 @@ docs/            adoption, stages, configuration, architecture, POC examples
 - Unit tests: `python -m unittest discover -s tests -v`
 - Try the plugin without a release: `claude --plugin-dir plugins/sdlc`
 - Release: bump `version` in `plugins/sdlc/.claude-plugin/plugin.json` and
-  `.claude-plugin/marketplace.json`, tag `v<version>`, push the tag. Projects
-  upgrade with `/sdlc:init upgrade=v<version>`.
+  `.claude-plugin/marketplace.json`, add a [CHANGELOG.md](CHANGELOG.md) entry
+  (with **Upgrading** steps if projects must act), tag `v<version>`, push the
+  tag. Projects upgrade with `/sdlc:init upgrade=v<version>`.
 
 The worked POC (a workout app taken from a requirement document through
 every stage) is in [docs/examples/poc/](docs/examples/poc/) and the
