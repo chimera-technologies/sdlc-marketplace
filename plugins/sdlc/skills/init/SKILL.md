@@ -41,6 +41,9 @@ Arguments: `$ARGUMENTS`
    - Jira: yes or no; if yes, the site (`<name>.atlassian.net`) and space key.
    - Stages to enable (default all): plan, design, ui_design, build,
      pr_review, test, deploy, maintain.
+   - Automatic Build (default yes): each story gets a plan PR, and merging
+     it builds the story in CI and opens the story PR. No = build every
+     story by hand with `/sdlc:build-story`.
    - Stack: the detected one, or "decide from the spec later". The stack is
      the tech lead's call in the spec; do not invent one for a new repo.
    - The plugin tag to pin (default: the latest `v*` tag of
@@ -49,10 +52,10 @@ Arguments: `$ARGUMENTS`
 3. **Write the answers** to `.sdlc-output/init-answers.json`:
 
    ```json
-   {"sdlc_ref": "v0.7.0", "base_branch": "main",
+   {"sdlc_ref": "v0.8.0", "base_branch": "main",
     "owners": {"product_owner": "@po", "service_owner": "@org/sre", "tech_lead": "@lead", "security_owner": "@lead"},
     "jira": {"enabled": true, "site": "acme.atlassian.net", "space_key": "ACM"},
-    "stages": {"ui_design": false},
+    "stages": {"ui_design": false}, "auto_build": true,
     "stack": {"toolchains": ["python@3.12"], "install_command": "pip install -r requirements.txt",
               "test_command": "pytest -q", "test_file_command": "pytest -q {file}", "test_paths": ["tests/"]}}
    ```

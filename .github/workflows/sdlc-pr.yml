@@ -250,11 +250,14 @@ jobs:
       - name: Validate plan and acceptance-test traceability
         run: |
           set -euo pipefail
-          [[ "$HEAD_REF" =~ ^story/([a-z][a-z0-9]*-[0-9]+)(-|$) ]] || { echo "::error::branch $HEAD_REF is not story/<jira-key>-<name>"; exit 1; }
-          key=$(tr '[:lower:]' '[:upper:]' <<<"${BASH_REMATCH[1]}")
-          plan=$(grep -lx "jira: $key" plans/*.md 2>/dev/null | head -n1 || true)
-          [ -n "$plan" ] || { echo "::error::no plan with 'jira: $key' in plans/; build stories with /sdlc:build-story"; exit 1; }
-          echo "Story $key, plan $plan"
+          # The plan names its branch (story/<jira-key>-<name>, or story/<spec-slug>-s<n> without Jira).
+          plan=$(grep -lx "branch: $HEAD_REF" plans/*.md 2>/dev/null | head -n1 || true)
+          if [ -z "$plan" ] && [[ "$HEAD_REF" =~ ^story/([a-z][a-z0-9]*-[0-9]+)(-|$) ]]; then
+            key=$(tr '[:lower:]' '[:upper:]' <<<"${BASH_REMATCH[1]}")   # older plans: by Jira key
+            plan=$(grep -lx "jira: $key" plans/*.md 2>/dev/null | head -n1 || true)
+          fi
+          [ -n "$plan" ] || { echo "::error::no plan in plans/ for branch $HEAD_REF; build stories with /sdlc:build-story"; exit 1; }
+          echo "Branch $HEAD_REF, plan $plan"
           python3 "$PLUGIN_DIR/skills/build-story/scripts/validate_plan.py" --check-tests "$plan"
 
   e2e:

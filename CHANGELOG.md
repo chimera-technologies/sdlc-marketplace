@@ -4,6 +4,38 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.8.0 (2026-09-30)
+
+Build is now automatic, one story at a time, with a plan PR before any code.
+
+- **New `sdlc-build.yml`** (called on every push to the base branch):
+  `next_story.py` finds each spec's first unfinished story from git and the
+  PR list. No plan yet: `sdlc:build-story mode=plan` writes the plan and it
+  opens as a PR on `plan/<slug>-s<n>`; merging it approves the plan. Plan
+  merged: `mode=build` follows it in CI (preflight with Graphify and a
+  pinned Ponytail, tests first, verifier) and opens the story PR (a draft
+  when incomplete). Merging the story PR starts the next story. A closed
+  plan or story PR stops that spec; nothing starts before the stack is
+  recorded; a story PR open without a plan pauses it (manual build).
+- **Guarded**: the build writes anywhere except the SDLC's own files
+  (`SDLC_WRITE_DENY` in the headless write guard; changes there are also
+  reverted before the PR); checkouts keep no credentials; no `git push`,
+  `gh` or `curl` for Claude; dependency and build output never committed.
+- **Build without Jira**: stories use `story/<spec-slug>-s<n>` and
+  `jira: none`; the build guard and traceability find a plan by its
+  `branch:` (older plans still by Jira key).
+- `.sdlc/sdlc.json`: new `auto_build` (default `true`) and `models.build`.
+  `setup-stack`: new `install-if-code` input.
+
+### Upgrading
+
+- Run `/sdlc:init upgrade=v0.8.0`: `sdlc-push.yml` gains the `build` job.
+  **Automatic Build is on by default**: after the upgrade merges, the next
+  push plans the first unfinished story of every spec. To keep building by
+  hand, set `"auto_build": false` in `.sdlc/sdlc.json` before upgrading.
+- Stories already built by hand count as done when a PR from their plan's
+  `branch:` has merged.
+
 ## v0.7.0 (2026-09-30)
 
 UI design is now automatic: every spec PR comes with mockups of its screens.

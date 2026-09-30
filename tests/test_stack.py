@@ -82,11 +82,17 @@ class StackTest(unittest.TestCase):
         # Story PRs (require-tests) always install and test.
         r = run("--skip-without-code", "--require-tests")
         self.assertIn("test_command=npm test", r.stdout)
+        # The first story's build: toolchains, but nothing to install yet.
+        r = run("--install-if-code", "--require-tests")
+        self.assertIn("node=22", r.stdout)
+        self.assertIn("install_command=\n", r.stdout)
+        self.assertIn("test_command=npm test", r.stdout)
         # Once code exists, the stack is used.
         (root / "src").mkdir()
         r = run("--skip-without-code")
         self.assertIn("install_command=npm ci", r.stdout)
         self.assertIn("node=22", r.stdout)
+        self.assertIn("install_command=npm ci", run("--install-if-code").stdout)
 
 
 if __name__ == "__main__":

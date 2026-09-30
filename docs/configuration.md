@@ -13,7 +13,8 @@ files; `sdlc.json` is regenerated from, the rest are the project's to edit
 | `base_branch` | The protected branch artifacts merge into (default `main`) |
 | `maintain_cron` | Schedule of the Maintain checks (default hourly `17 * * * *`) |
 | `stages` | `plan`, `design`, `ui_design`, `build`, `pr_review`, `test`, `deploy`, `maintain`: `true`/`false` |
-| `models` | `intake`, `spec`, `review`: the Claude model per headless stage |
+| `models` | `intake`, `spec`, `review`, `build`: the Claude model per headless stage |
+| `auto_build` | `true` (default): each story gets a plan PR and is built in CI when it merges (`sdlc-build.yml`); `false`: build by hand with `/sdlc:build-story` |
 
 Change it and re-run `/sdlc:init` (or `init_project.py --answers`), or move
 the tag with `init_project.py --upgrade vX.Y.Z`.

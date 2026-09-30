@@ -53,7 +53,10 @@ on the marketplace repo (or someone who has it).
   `intent`. Merge the intent PR: the spec PR follows.
 - After the spec merges, record the stack if you had none:
   `/sdlc:init stack=specs/<slug>.md`.
-- Build: `/sdlc:build-story <KEY>` in a fresh session per story.
+- Build: automatic once the stack is recorded. Each story gets a plan PR;
+  merging it builds the story in CI and opens the story PR; merging that
+  starts the next story. To build by hand instead, set `"auto_build": false`
+  in `.sdlc/sdlc.json`, re-run init, and use `/sdlc:build-story <KEY>`.
 
 ## Upgrading
 

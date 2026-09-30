@@ -6,8 +6,10 @@ opted in). A write under one of its `code_paths` (e.g. src/, tests/) is
 blocked unless:
   1. the Graphify knowledge graph exists (graphify-out/graph.json),
   2. Ponytail is enabled in .claude/settings.json and active this session,
-  3. the current git branch is a story branch (story/<jira-key>-<name>),
-  4. a plan for that story exists (plans/*.md with `jira: <KEY>`).
+  3. the current git branch is a story branch (story/<jira-key>-<name>, or
+     story/<spec-slug>-s<n> without Jira),
+  4. a plan for that story exists (plans/*.md whose `branch:` is this
+     branch, or, for older plans, whose `jira:` is the branch's key).
 Exit 2 blocks the write and tells Claude how to fix it. Everything else
 passes. The build-story skill's preflight script sets up 1 and 2.
 """
@@ -18,7 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-STORY_BRANCH_RE = re.compile(r"^story/([a-z][a-z0-9]*-\d+)(?:-|$)")
+STORY_BRANCH_RE = re.compile(r"^story/[a-z0-9]+(?:-[a-z0-9]+)*$")
+JIRA_BRANCH_RE = re.compile(r"^story/([a-z][a-z0-9]*-\d+)(?:-|$)")
 _PREFLIGHT_PY = Path(__file__).resolve().parents[1] / "skills" / "build-story" / "scripts" / "build_preflight.py"
 PREFLIGHT = f'python "{_PREFLIGHT_PY.as_posix()}"'
 
@@ -66,13 +69,18 @@ def current_branch(project):
     return out.stdout.strip() if out.returncode == 0 else None
 
 
-def plan_for(project, key):
+def plan_for(project, branch):
+    """The plan whose `branch:` is this branch (or, for older plans, whose `jira:` is its key)."""
     plans = Path(project) / "plans"
     if not plans.is_dir():
         return None
+    m = JIRA_BRANCH_RE.match(branch)
+    patterns = [rf"^branch:\s*['\"]?{re.escape(branch)}['\"]?\s*$"]
+    if m:
+        patterns.append(rf"^jira:\s*['\"]?{re.escape(m.group(1).upper())}['\"]?\s*$")
     for p in sorted(plans.glob("*.md")):
         text = p.read_text(encoding="utf-8", errors="replace")
-        if re.search(rf"^jira:\s*['\"]?{re.escape(key)}['\"]?\s*$", text, re.MULTILINE):
+        if any(re.search(pat, text, re.MULTILINE) for pat in patterns):
             return p
     return None
 
@@ -95,12 +103,12 @@ def check(project, rel):
                         "then `/clear`, and start again with /sdlc:build-story.")
     branch = current_branch(project)
     if branch is not None:
-        m = STORY_BRANCH_RE.match(branch)
-        if not m:
-            problems.append(f"Branch {branch!r} is not a story branch. Code is written on story/<jira-key>-<name>, "
-                            "created by /sdlc:build-story after the plan is approved.")
-        elif plan_for(project, m.group(1).upper()) is None:
-            problems.append(f"No plan for {m.group(1).upper()} in plans/. Write and approve the plan first "
+        if not STORY_BRANCH_RE.match(branch):
+            problems.append(f"Branch {branch!r} is not a story branch. Code is written on story/<jira-key>-<name> "
+                            "(or story/<spec-slug>-s<n> without Jira), created by /sdlc:build-story after the "
+                            "plan is approved.")
+        elif plan_for(project, branch) is None:
+            problems.append(f"No plan in plans/ for branch {branch!r}. Write and approve the plan first "
                             "(/sdlc:build-story Step 2).")
     return problems
 

@@ -5,8 +5,9 @@ description: Build one story from an accepted spec (the Build stage of the
   the next story", or runs /sdlc:build-story. It sets up Graphify and
   Ponytail first, plans in plan mode, writes the acceptance tests first,
   implements until they pass, has the verifier subagent check the result,
-  and opens the story PR.
-argument-hint: "<JIRA-KEY or S<n>>, e.g. ABC-123"
+  and opens the story PR. The sdlc-build workflow runs it headless in two
+  halves, a plan PR then the build.
+argument-hint: "<JIRA-KEY or S<n>> | mode=plan spec=specs/<slug>.md story=S<n> [jira=ABC-123] | mode=build plan=plans/<id>.md"
 ---
 
 # Build a story
@@ -21,6 +22,11 @@ Files in this skill:
 - Verifier subagent: `sdlc:verifier` (plugin agent)
 
 Arguments: `$ARGUMENTS`
+
+**Modes.** Interactive (a Jira key or `S<n>`): Steps 0 to 7 below.
+`mode=plan` and `mode=build` are the automatic Build (the `sdlc-build`
+workflow, headless): follow "Headless plan" or "Headless build" at the end
+instead. Both still start with Step 0.
 
 ## Step 0: preflight (always first, never skipped)
 
@@ -90,9 +96,10 @@ Wait for the person to approve the plan. Change it if they ask.
 
 1. `git checkout main && git pull`, then
    `git checkout -b story/<jira-key-lowercase>-<short-name>` (the branch in
-   `CLAUDE.md`).
+   `CLAUDE.md`). Without Jira: `story/<spec-slug>-s<n>`.
 2. Write the approved plan to `plans/<spec-slug>-s<n>.md` with frontmatter
-   `id`, `spec`, `story`, `jira`, `branch`, `created`, and validate it:
+   `id`, `spec`, `story`, `jira` (`none` without Jira), `branch`, `created`,
+   and validate it:
    `python "${CLAUDE_SKILL_DIR}/scripts/validate_plan.py" plans/<id>.md`.
    Fix every error.
 3. If the Atlassian MCP is connected: move the Jira story to *In Progress*
@@ -164,3 +171,47 @@ smaller model with fresh context and reports PASS or FAIL per criterion.
   test the spec requires stays in, however short the code.
 - The verifier runs on a smaller model with only the diff; do not paste the
   whole conversation into it.
+
+## Headless plan (`mode=plan spec=specs/<slug>.md story=S<n> [jira=KEY]`)
+
+The workflow opens the plan as a PR; merging it is the plan approval (it
+replaces plan mode). Never ask, never wait.
+
+1. Step 0 (preflight). Exit 3 is expected in CI (Ponytail loads with this
+   session); continue. Exit 1: stop.
+2. Step 1 for the given story, then Step 2 **without plan mode and without
+   waiting**: read the graph, the files the story needs, the design screens
+   (Read the PNGs) and write the plan to `plans/<slug>-s<n>.md` with
+   frontmatter `id: <slug>-s<n>`, `spec`, `story`, `jira` (the given key, or
+   `none`), `branch` (`story/<jira-key-lowercase>-<short-name>`, or
+   `story/<slug>-s<n>` when `jira: none`), `created` (today).
+3. Validate: `python3 "${CLAUDE_SKILL_DIR}/scripts/validate_plan.py" plans/<slug>-s<n>.md`
+   and fix every error.
+4. Anything the owner must decide (an open question this story depends on,
+   a default you chose) goes in the plan's Risks and rollback section as
+   "Decision to confirm: ...". Write nothing else; do not branch or commit.
+
+## Headless build (`mode=build plan=plans/<id>.md`)
+
+The workflow has checked out the plan's branch and opens the story PR from
+what you leave in the working tree. The merged plan is the approved plan:
+**follow it exactly**; do not edit `plans/`, `specs/`, `designs/`,
+`.sdlc/`, `.github/` or `.claude/` (blocked, and the PR is refused if they
+change). Never ask, never wait.
+
+1. Step 0 (preflight), as above.
+2. Steps 4, 5 and 6 (tests first, implement until green, verifier), using
+   the plan's Files and Tests tables. Install dependencies yourself with the
+   stack's commands when the story adds them (for example `npm install`
+   for a new `package.json`). Do not run `git` commands.
+3. Write `.sdlc-output/build-report.md` for the PR body:
+   - first line exactly `RESULT: PASS` (verifier PASS, full suite green,
+     `--check-tests` clean) or `RESULT: INCOMPLETE`;
+   - the AC-to-test table (criterion, test file, test name, passing);
+   - the verifier's report;
+   - for INCOMPLETE: what is blocking and what a person should do next
+     (after 5 failed rounds on one test, or two verifier FAILs, stop and
+     write this instead of continuing).
+   If the plan itself is wrong (a file or step that cannot work), do not
+   improvise a different design: write INCOMPLETE and say which part of the
+   plan must change.

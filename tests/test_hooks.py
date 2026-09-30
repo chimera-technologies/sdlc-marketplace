@@ -63,6 +63,18 @@ class HeadlessWriteGuardTest(HookTestBase):
         self.assertEqual(self.guard(self.project / "specs" / "a.md", **env).returncode, 0)
         self.assertEqual(self.guard(self.project / "intent" / "a.md", **env).returncode, 2)
 
+    def test_allow_anywhere_with_a_deny_list(self):
+        # The headless Build: code anywhere, never the SDLC's own files.
+        env = dict(SDLC_HEADLESS="1", SDLC_WRITE_ALLOW="*", SDLC_WRITE_DENY=".github/,.sdlc/,plans/,CLAUDE.md")
+        for ok in [self.project / "src" / "app.ts", self.project / "package.json", self.project / "tests" / "a.spec.ts"]:
+            self.assertEqual(self.guard(ok, **env).returncode, 0, ok)
+        for bad in [self.project / ".github" / "workflows" / "x.yml", self.project / ".sdlc" / "build.yaml",
+                    self.project / "plans" / "a.md", self.project / "CLAUDE.md", self.project / "src" / ".." / "CLAUDE.md"]:
+            r = self.guard(bad, **env)
+            self.assertEqual(r.returncode, 2, bad)
+            self.assertIn("may not write", r.stderr)
+        self.assertEqual(self.guard(Path(tempfile.gettempdir()) / "evil.sh", **env).returncode, 2)
+
     def test_notebook_path(self):
         event = {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": str(self.project / "x.ipynb")}}
         r = run_hook("headless_write_guard.py", event, self.project, SDLC_HEADLESS="1")

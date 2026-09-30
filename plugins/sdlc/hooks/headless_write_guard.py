@@ -4,7 +4,10 @@
 Active only when SDLC_HEADLESS=1 (set by the SDLC workflows). Interactive
 sessions are unaffected. Allowed path prefixes, relative to the project, come
 from SDLC_WRITE_ALLOW (comma-separated): a folder prefix ("intent/") or one
-exact file. Default "intent/,.sdlc-output/duplicate.txt".
+exact file, or "*" for anywhere in the project. Default
+"intent/,.sdlc-output/duplicate.txt". SDLC_WRITE_DENY (same format) wins
+over the allow list: the headless Build uses ALLOW=* with the SDLC's own
+files (.github/, .sdlc/, specs/, plans/, ...) denied.
 Exit 2 blocks the tool call and tells Claude why.
 """
 import json
@@ -28,7 +31,8 @@ def main():
     if not file_path:
         return 0
 
-    allow = [p.strip().strip("/") for p in os.environ.get("SDLC_WRITE_ALLOW", DEFAULT_ALLOW).split(",") if p.strip()]
+    allow = split(os.environ.get("SDLC_WRITE_ALLOW", DEFAULT_ALLOW))
+    deny = split(os.environ.get("SDLC_WRITE_DENY", ""))
     project = Path(os.environ.get("CLAUDE_PROJECT_DIR") or event.get("cwd") or os.getcwd()).resolve()
     path = Path(file_path)
     if not path.is_absolute():
@@ -38,7 +42,11 @@ def main():
         rel = path.relative_to(project).as_posix()
     except ValueError:
         rel = None
-    if rel and any(rel == a or rel.startswith(a + "/") for a in allow):
+    if rel and under(rel, deny):
+        print(f"Blocked: headless SDLC runs may not write to {', '.join(deny)}; '{rel}' is one of them.",
+              file=sys.stderr)
+        return 2
+    if rel and ("*" in allow or under(rel, allow)):
         return 0
     shown = rel or str(path)
     print(
@@ -47,6 +55,14 @@ def main():
         file=sys.stderr,
     )
     return 2
+
+
+def split(value):
+    return [p.strip().strip("/") for p in value.split(",") if p.strip()]
+
+
+def under(rel, prefixes):
+    return any(rel == p or rel.startswith(p + "/") for p in prefixes if p != "*")
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ def load(name, path):
 vp = load("validate_plan", PLUGIN / "skills" / "build-story" / "scripts" / "validate_plan.py")
 bg = load("build_guard", PLUGIN / "hooks" / "build_guard.py")
 bp = load("build_preflight", PLUGIN / "skills" / "build-story" / "scripts" / "build_preflight.py")
+ns = load("next_story", PLUGIN / "skills" / "build-story" / "scripts" / "next_story.py")
 
 TEST_FILE = '''
 test("S1 AC-1: only the customer's own claims", () => {});
@@ -137,6 +138,97 @@ class ValidatePlanTest(Repo):
         self.assertEqual(vp.test_names_found(self.root, ["S1 AC-1", "S1 AC-2", "S1 AC-3"]), set())
 
 
+class PlanWithoutJiraTest(Repo):
+    def no_jira(self, branch="story/claims-status-self-service-s1"):
+        return (self.plan_text.replace("jira: CLM-483", "jira: none")
+                .replace("branch: story/clm-483-status-endpoint", f"branch: {branch}"))
+
+    def test_jira_none_with_plan_branch_is_valid(self):
+        self.assertEqual(vp.validate(self.plan(self.no_jira()), self.root)[1], [])
+        self.assertEqual(vp.validate(self.plan(self.no_jira("story/claims-status-self-service-s1-endpoint")), self.root)[1], [])
+
+    def test_jira_none_needs_the_plan_branch(self):
+        _, errors, _ = vp.validate(self.plan(self.no_jira("story/endpoint")), self.root)
+        self.assertError(errors, "branch must be story/claims-status-self-service-s1 (jira: none)")
+
+    def test_jira_must_be_a_key_or_none(self):
+        _, errors, _ = vp.validate(self.plan(self.plan_text.replace("jira: CLM-483", "jira: nope")), self.root)
+        self.assertError(errors, "Jira key (ABC-123) or none")
+
+
+class NextStoryTest(Repo):
+    """next_story.py: the automatic Build's state machine (git + PR list only)."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / ".sdlc" / "build.yaml").write_text("test_command: pytest -q\n", encoding="utf-8")
+
+    def decide(self, prs=()):
+        return ns.decide(self.root, [{"headRefName": h, "state": s} for h, s in prs])
+
+    def only(self, result):
+        self.assertEqual(len(result["actions"]) + len(result["waiting"]), 1, result)
+        return (result["actions"] or result["waiting"])[0]
+
+    def test_first_story_is_planned(self):
+        a = self.only(self.decide())
+        self.assertEqual((a["action"], a["story"], a["id"]), ("plan", "S1", "claims-status-self-service-s1"))
+
+    def test_waits_for_the_plan_pr(self):
+        w = self.only(self.decide([("plan/claims-status-self-service-s1", "OPEN")]))
+        self.assertIn("plan PR open", w["reason"])
+
+    def test_merged_plan_is_built_on_its_branch(self):
+        self.plan()
+        a = self.only(self.decide([("plan/claims-status-self-service-s1", "MERGED")]))
+        self.assertEqual((a["action"], a["branch"], a["plan"]),
+                         ("build", "story/clm-483-status-endpoint", "plans/claims-status-self-service-s1.md"))
+
+    def test_waits_for_the_story_pr(self):
+        self.plan()
+        self.assertIn("story PR open", self.only(self.decide([("story/clm-483-status-endpoint", "OPEN")]))["reason"])
+
+    def test_merged_story_moves_to_the_next(self):
+        self.plan()
+        a = self.only(self.decide([("story/clm-483-status-endpoint", "MERGED")]))
+        self.assertEqual((a["action"], a["story"]), ("plan", "S2"))
+
+    def test_rejections_stop_the_loop(self):
+        self.assertIn("closed without merge", self.only(self.decide([("plan/claims-status-self-service-s1", "CLOSED")]))["reason"])
+        self.plan()
+        self.assertIn("closed without merge", self.only(self.decide([("story/clm-483-status-endpoint", "CLOSED")]))["reason"])
+        # A later attempt that merged wins over an earlier closed one.
+        a = self.only(self.decide([("story/clm-483-status-endpoint", "CLOSED"), ("story/clm-483-status-endpoint", "MERGED")]))
+        self.assertEqual(a["story"], "S2")
+
+    def test_all_done(self):
+        prs = []
+        for n, branch in ((1, "story/clm-483-a"), (2, "story/clm-484-b"), (3, "story/clm-485-c")):
+            text = (self.plan_text.replace("claims-status-self-service-s1", f"claims-status-self-service-s{n}")
+                    .replace("story: S1", f"story: S{n}").replace("story/clm-483-status-endpoint", branch))
+            self.plan(text, f"claims-status-self-service-s{n}")
+            prs.append((branch, "MERGED"))
+        self.assertEqual(self.decide(prs), {"actions": [], "waiting": []})
+
+    def test_nothing_moves_without_a_stack(self):
+        (self.root / ".sdlc" / "build.yaml").write_text("code_paths: [src/]\n", encoding="utf-8")
+        self.assertIn("record the stack", self.only(self.decide())["reason"])
+
+    def test_manual_build_in_progress_pauses(self):
+        self.assertIn("manual build", self.only(self.decide([("story/clm-9-local", "OPEN")]))["reason"])
+
+    def test_cli(self):
+        prs = self.root / "prs.json"
+        prs.write_text("[]", encoding="utf-8")
+        r = subprocess.run([sys.executable, str(PLUGIN / "skills" / "build-story" / "scripts" / "next_story.py"),
+                            "--root", str(self.root), "--prs", str(prs)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["actions"][0]["action"], "plan")
+        r = subprocess.run([sys.executable, str(PLUGIN / "skills" / "build-story" / "scripts" / "next_story.py"),
+                            "--root", str(self.root), "--prs", str(prs), "--spec", "../etc/x.md"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+
+
 class BuildGuardTest(Repo):
     def setUp(self):
         super().setUp()
@@ -187,7 +279,21 @@ class BuildGuardTest(Repo):
     def test_story_branch_needs_its_plan(self):
         self.ready()
         (self.root / "plans" / "claims-status-self-service-s1.md").unlink()
-        self.assertTrue(any("No plan for CLM-483" in p for p in bg.check(self.root, "tests/api/t.py")))
+        self.assertTrue(any("No plan in plans/ for branch 'story/clm-483-status-endpoint'" in p
+                            for p in bg.check(self.root, "tests/api/t.py")))
+
+    def test_plan_found_by_its_branch_without_jira(self):
+        self.ready()
+        subprocess.run(["git", "checkout", "-q", "-b", "story/claims-status-self-service-s1"], cwd=self.root, check=True)
+        self.assertTrue(any("No plan in plans/" in p for p in bg.check(self.root, "src/app.js")))
+        self.plan(self.plan_text.replace("jira: CLM-483", "jira: none")
+                  .replace("branch: story/clm-483-status-endpoint", "branch: story/claims-status-self-service-s1"))
+        self.assertEqual(bg.check(self.root, "src/app.js"), [])
+
+    def test_older_plan_found_by_jira_key(self):
+        self.ready()
+        subprocess.run(["git", "checkout", "-q", "-b", "story/clm-483-renamed"], cwd=self.root, check=True)
+        self.assertEqual(bg.check(self.root, "src/app.js"), [])
 
     def test_allowed_when_ready(self):
         self.ready()
