@@ -84,12 +84,14 @@ jobs:
           set -euo pipefail
           story=false
           if [[ "$HEAD_REF" == story/* ]] && [ "$DRAFT" != "true" ]; then story=true; fi
-          echo "story=$story" >> "$GITHUB_OUTPUT"
-          echo "fail_on=$(jq -r '.gate.fail_on // "high"' .sdlc/review.json)" >> "$GITHUB_OUTPUT"
-          echo "model=$(jq -r '.gate.model // "claude-sonnet-5"' .sdlc/review.json)" >> "$GITHUB_OUTPUT"
           advisory=$(jq -c --arg repo "$GITHUB_REPOSITORY" --arg pr "$PR" \
             '[.advisory[]? | .prompt |= (gsub("\\{repo\\}"; $repo) | gsub("\\{pr\\}"; $pr))]' .sdlc/review.json)
-          echo "advisory=$advisory" >> "$GITHUB_OUTPUT"
+          {
+            echo "story=$story"
+            echo "fail_on=$(jq -r '.gate.fail_on // "high"' .sdlc/review.json)"
+            echo "model=$(jq -r '.gate.model // "claude-sonnet-5"' .sdlc/review.json)"
+            echo "advisory=$advisory"
+          } >> "$GITHUB_OUTPUT"
           echo "Story PR: $story; advisory reviewers: $(jq -r 'map(.name) | join(", ")' <<<"$advisory")"
 
   review-gate:
@@ -249,7 +251,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$HEAD_REF" =~ ^story/([a-z][a-z0-9]*-[0-9]+)(-|$) ]] || { echo "::error::branch $HEAD_REF is not story/<jira-key>-<name>"; exit 1; }
-          key=$(tr 'a-z' 'A-Z' <<<"${BASH_REMATCH[1]}")
+          key=$(tr '[:lower:]' '[:upper:]' <<<"${BASH_REMATCH[1]}")
           plan=$(grep -lx "jira: $key" plans/*.md 2>/dev/null | head -n1 || true)
           [ -n "$plan" ] || { echo "::error::no plan with 'jira: $key' in plans/; build stories with /sdlc:build-story"; exit 1; }
           echo "Story $key, plan $plan"

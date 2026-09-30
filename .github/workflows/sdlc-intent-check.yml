@@ -103,11 +103,13 @@ jobs:
 
           # Revisions of an already-accepted intent are tracked (lagging indicator)
           revised=$(git diff --name-only --diff-filter=M HEAD^1 HEAD -- 'intent/*.md' | tr '\n' ' ')
-          echo "revised=$revised" >> "$GITHUB_OUTPUT"
           python3 "$VALIDATE" --json "${files[0]}" > fm.json
-          echo "owner=$(jq -r .owner fm.json)" >> "$GITHUB_OUTPUT"
-          echo "risk=$(jq -r .risk fm.json)" >> "$GITHUB_OUTPUT"
-          echo "source=$(jq -r .source fm.json)" >> "$GITHUB_OUTPUT"
+          {
+            echo "revised=$revised"
+            echo "owner=$(jq -r .owner fm.json)"
+            echo "risk=$(jq -r .risk fm.json)"
+            echo "source=$(jq -r .source fm.json)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Route review and label
         if: steps.check.outputs.owner != ''
@@ -128,7 +130,7 @@ jobs:
           done
           gh pr edit "$PR" --add-label "intent,source:$SRC,risk:$RISK${REVISED:+,intent-revision}"
           for l in risk:low risk:medium risk:high; do
-            [ "$l" != "risk:$RISK" ] && gh pr edit "$PR" --remove-label "$l" >/dev/null 2>&1 || true
+            if [ "$l" != "risk:$RISK" ]; then gh pr edit "$PR" --remove-label "$l" >/dev/null 2>&1 || true; fi
           done
           reviewer="${OWNER#@}"
           if [ "$reviewer" != "$AUTHOR" ]; then

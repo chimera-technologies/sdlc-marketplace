@@ -112,7 +112,7 @@ jobs:
             echo "::error::source jira requires record_id"; exit 1; fi
           if [ -n "$FINGERPRINT" ] && ! [[ "$FINGERPRINT" =~ ^[a-z0-9-]{1,60}$ ]]; then
             echo "::error::fingerprint must match ^[a-z0-9-]{1,60}$"; exit 1; fi
-          if [ "$RECORD_ID" != "none" ]; then KEY=$(echo "$RECORD_ID" | tr 'A-Z' 'a-z')
+          if [ "$RECORD_ID" != "none" ]; then KEY=$(echo "$RECORD_ID" | tr '[:upper:]' '[:lower:]')
           elif [ -n "$FINGERPRINT" ]; then KEY="$FINGERPRINT"
           else echo "::error::need record_id or fingerprint for dedup"; exit 1; fi
           echo "KEY=$KEY" >> "$GITHUB_ENV"
@@ -152,7 +152,7 @@ jobs:
             existing=$(grep -rlx "fingerprint: $FINGERPRINT" intent/ | head -n1)
           fi
           echo "existing=$existing" >> "$GITHUB_OUTPUT"
-          [ -n "$existing" ] && echo "::notice::Duplicate of $existing; not creating a new intent." || true
+          if [ -n "$existing" ]; then echo "::notice::Duplicate of $existing; not creating a new intent."; fi
 
       - name: Fetch source record
         if: steps.dedup.outputs.existing == ''
