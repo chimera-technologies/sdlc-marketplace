@@ -4,7 +4,8 @@
 Active only in a repo with `.sdlc/build.yaml` (a product repo that has
 opted in). A write under one of its `code_paths` (e.g. src/, tests/) is
 blocked unless:
-  1. the Graphify knowledge graph exists (graphify-out/graph.json),
+  1. the Graphify knowledge graph exists (graphify-out/graph.json), or the
+     preflight found no code to index yet (graphify-out/NO-CODE-YET),
   2. Ponytail is enabled in .claude/settings.json and active this session,
   3. the current git branch is a story branch (story/<jira-key>-<name>, or
      story/<spec-slug>-s<n> without Jira),
@@ -44,6 +45,11 @@ def load_build_config(project):
             cfg[key.strip()] = val.strip("'\"")
     cfg.setdefault("code_paths", ["src/", "tests/"])
     return cfg
+
+
+def no_code_marker(project):
+    """Left by the preflight when there was no code to index (the first story)."""
+    return Path(project) / "graphify-out" / "NO-CODE-YET"
 
 
 def ponytail_flag():
@@ -94,7 +100,8 @@ def check(project, rel):
     if not any(rel == p or rel.startswith(p + "/") for p in prefixes):
         return []
     problems = []
-    if not (Path(project) / "graphify-out" / "graph.json").is_file():
+    graph = Path(project) / "graphify-out" / "graph.json"
+    if not graph.is_file() and not no_code_marker(project).is_file():
         problems.append(f"No Graphify graph (graphify-out/graph.json). Run the preflight: {PREFLIGHT}")
     if not ponytail_enabled(project):
         problems.append(f"Ponytail is not enabled in .claude/settings.json. Run the preflight: {PREFLIGHT}")
