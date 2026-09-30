@@ -54,6 +54,10 @@ jobs:
           python plugins/sdlc/skills/design-ui/scripts/validate_design.py \
             --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \
             --root "$d" "$d/designs/claims-status-self-service/design.md"
+          # The example release record.
+          python plugins/sdlc/skills/release/scripts/validate_release.py \
+            --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \
+            plugins/sdlc/skills/release/examples/v1.1.0.md
 
       - name: Plugin and marketplace versions match
         run: |
@@ -85,3 +89,20 @@ jobs:
         run: |
           claude plugin validate .
           claude plugin validate plugins/sdlc
+
+  workflows:
+    # The reusable workflows and the setup-stack action are what every project runs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint workflows with actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color .github/workflows/*.yml
+      - name: Generated callers lint too
+        run: |
+          d=$(mktemp -d)
+          printf '%s' '{"sdlc_ref":"v0.0.1","owners":{"product_owner":"@a","service_owner":"@b","tech_lead":"@c"},"jira":{"enabled":true,"site":"x.atlassian.net","space_key":"ABC"}}' > "$d/answers.json"
+          python3 plugins/sdlc/skills/init/scripts/init_project.py --root "$d" --answers "$d/answers.json" >/dev/null
+          ./actionlint -color "$d"/.github/workflows/*.yml

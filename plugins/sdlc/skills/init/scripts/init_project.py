@@ -278,7 +278,7 @@ def render_claude_block(a):
     if s["maintain"]:
         rows.append("| Maintain | scheduled checks in `.sdlc/maintain.json` | new intents | owner triages the intent PR |")
     return f"""{BEGIN}
-## SDLC
+## SDLC loop (sdlc plugin)
 
 This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
 (set up with `/sdlc:init`; this block is regenerated, edit outside it).

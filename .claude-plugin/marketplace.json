@@ -1,15 +1,17 @@
 {
   "name": "chimera-sdlc",
-  "owner": { "name": "bala-chimera (POC)" },
+  "owner": {
+    "name": "bala-chimera (POC)"
+  },
   "metadata": {
-    "description": "Approved plugin marketplace for the AI-native SDLC. The only source of skills, agents and hooks."
+    "description": "Approved plugin marketplace for the AI-native SDLC: the sdlc plugin and the reusable workflows projects call."
   },
   "plugins": [
     {
       "name": "sdlc",
       "source": "./plugins/sdlc",
-      "description": "AI-native SDLC loop: write-intent (Plan), write-spec, review-spec and design-ui (Design), build-story and verifier (Build), review-story (PR review), security-policy, and guardrail hooks.",
-      "version": "0.5.0"
+      "description": "AI-native SDLC for any project and tech stack: Plan (write-intent), Design (write-spec, review-spec, design-ui), Build (build-story with Graphify and Ponytail, verifier), PR review (review-story), Test, Deploy (release), Maintain (triage), onboarding (init), guardrail hooks, and reusable GitHub workflows.",
+      "version": "0.6.0"
     }
   ]
 }
