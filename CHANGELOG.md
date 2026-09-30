@@ -4,6 +4,13 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.6.2 (2026-09-30)
+
+- A project whose stack is still "decided by the spec" no longer fails the
+  Test stage: `sdlc-pr.yml` (`e2e`) and `sdlc-main-tests.yml` skip the tests
+  with a notice while `.sdlc/build.yaml` has no `test_command`. Story PRs
+  still require one.
+
 ## v0.6.1 (2026-09-30)
 
 - `init_project.py` and `build_preflight.py` run on Python 3.9 again

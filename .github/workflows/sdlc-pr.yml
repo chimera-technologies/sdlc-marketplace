@@ -286,9 +286,16 @@ jobs:
         id: stack
         uses: ./.sdlc-plugin/.github/actions/setup-stack
         with:
-          require-tests: "true"
+          # Story PRs need a stack; intent, spec and design PRs come before
+          # the spec has decided one.
+          require-tests: ${{ needs.config.outputs.story == 'true' && 'true' || 'false' }}
+
+      - name: No stack recorded yet
+        if: steps.stack.outputs.test_command == ''
+        run: echo "::notice::No test_command in .sdlc/build.yaml yet; tests skipped. Record the stack with /sdlc:init stack=specs/<slug>.md."
 
       - name: Run the project's tests (test_command)
+        if: steps.stack.outputs.test_command != ''
         env:
           CMD: ${{ steps.stack.outputs.test_command }}
         run: bash -euo pipefail -c "$CMD"

@@ -75,10 +75,15 @@ jobs:
       - name: Set up the project's stack (.sdlc/build.yaml)
         id: stack
         uses: ./.sdlc-plugin/.github/actions/setup-stack
-        with:
-          require-tests: "true"
+        # No require-tests: main has no stack until the first spec's decision
+        # is recorded, and that must not turn main red.
+
+      - name: No stack recorded yet
+        if: steps.stack.outputs.test_command == ''
+        run: echo "::notice::No test_command in .sdlc/build.yaml yet; tests skipped. Record the stack with /sdlc:init stack=specs/<slug>.md."
 
       - name: Run the project's tests (test_command)
+        if: steps.stack.outputs.test_command != ''
         env:
           CMD: ${{ steps.stack.outputs.test_command }}
         run: bash -euo pipefail -c "$CMD"
