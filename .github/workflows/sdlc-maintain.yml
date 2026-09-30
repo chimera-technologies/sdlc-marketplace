@@ -1,0 +1,75 @@
+name: "SDLC Maintain - checks"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Maintain stage: on
+# the caller's schedule, run each check in the project's .sdlc/maintain.json
+# (any command: exit 0 healthy, exit 1 + a JSON signal on a breach). Each
+# breach is sent to the project's intake (repository_dispatch create-intent),
+# which drafts an intent PR for the service owner, deduplicated by
+# fingerprint. No model runs here; the intake is where Claude drafts.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of the plugin marketplace (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        type: string
+        required: true
+      base_branch:
+        type: string
+        default: main
+      jira_base_url:
+        type: string
+        default: ""
+      jira_user_email:
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Set up the project's stack (checks may need it)
+        uses: ./.sdlc-plugin/.github/actions/setup-stack
+
+      - name: Run checks; send breaches to the intake
+        env:
+          # The App token can send repository_dispatch; GITHUB_TOKEN events would not start the intake.
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: python3 .sdlc-plugin/plugins/sdlc/skills/triage/scripts/run_checks.py --dispatch

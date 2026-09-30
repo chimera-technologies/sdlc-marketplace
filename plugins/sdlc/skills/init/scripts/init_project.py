@@ -37,7 +37,7 @@ PONYTAIL_REF = "v4.10.0"
 STAGES = ["plan", "design", "ui_design", "build", "pr_review", "test", "deploy", "maintain"]
 DEFAULT_MODELS = {"intake": "claude-sonnet-5", "spec": "claude-opus-5-5", "review": "claude-sonnet-5"}
 BEGIN, END = "<!-- sdlc:begin -->", "<!-- sdlc:end -->"
-FOLDERS = ["intent", "specs", "designs", "plans", "releases"]
+FOLDERS = ["intent", "specs", "designs", "plans", "releases", "runbooks"]
 GITIGNORE = [".sdlc-input/", ".sdlc-output/", ".sdlc-plugin/", "graphify-out/",
              ".claude/settings.local.json", ".claude/*.graphify-bak"]
 ALLOW = [
@@ -303,12 +303,12 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
 # --------------------------------------------------------------------------- callers
 
 
-def secrets_block(indent="    "):
-    names = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "SDLC_APP_PRIVATE_KEY", "JIRA_API_TOKEN"]
+def secrets_block(indent="    ", extra=()):
+    names = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "SDLC_APP_PRIVATE_KEY", "JIRA_API_TOKEN", *extra]
     return f"{indent}secrets:\n" + "".join(f"{indent}  {n}: ${{{{ secrets.{n} }}}}\n" for n in names)
 
 
-def call(a, workflow, extra_with="", if_expr="", indent="  "):
+def call(a, workflow, extra_with="", if_expr="", extra_secrets=()):
     with_lines = (f"      sdlc_ref: {a['sdlc_ref']}\n"
                   f"      sdlc_repo: {a['sdlc_repo']}\n"
                   "      app_id: ${{ vars.SDLC_APP_ID }}\n"
@@ -317,7 +317,7 @@ def call(a, workflow, extra_with="", if_expr="", indent="  "):
                   "      jira_user_email: ${{ vars.JIRA_USER_EMAIL }}\n" + extra_with)
     cond = f"    if: {if_expr}\n" if if_expr else ""
     return (f"{cond}    uses: {a['sdlc_repo']}/.github/workflows/{workflow}@{a['sdlc_ref']}\n"
-            f"    with:\n{with_lines}" + secrets_block())
+            f"    with:\n{with_lines}" + secrets_block(extra=extra_secrets))
 
 
 def header(a, title, what):
@@ -364,7 +364,8 @@ def render_callers(a):
         jobs.append("  release:\n" + call(
             a, "sdlc-release.yml",
             extra_with="      release_file: ${{ inputs.rerun == 'release' && inputs.file || '' }}\n",
-            if_expr="github.event_name == 'push' || inputs.rerun == 'release'"))
+            if_expr="github.event_name == 'push' || inputs.rerun == 'release'",
+            extra_secrets=("DEPLOY_TOKEN",)))
     if jobs:
         options = [o for o, on in (("intent-to-spec", s["design"]), ("spec-to-stories", s["design"]), ("release", s["deploy"])) if on]
         files[".github/workflows/sdlc-push.yml"] = (

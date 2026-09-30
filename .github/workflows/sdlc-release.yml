@@ -1,0 +1,264 @@
+name: "SDLC Deploy - release"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Deploy stage: when a
+# release record (releases/<version>.md, written by /sdlc:release) merges,
+#   detect     -> validate the record; read .sdlc/deploy.yaml
+#   tag        -> create the tag and GitHub release at the record's commit
+#   staging    -> run deploy_command with SDLC_ENV=staging (environment: staging)
+#   production -> run deploy_command with SDLC_ENV=production in the production
+#                 environment, which waits for its required reviewers (the
+#                 release manager). No model involved; nothing deploys without
+#                 a human approval of production.
+#   jira       -> comment "Released in <version>" on each story in the record
+# With no deploy_command, a release is the tag + GitHub release + record only.
+# deploy_command gets SDLC_ENV, SDLC_VERSION, SDLC_COMMIT, and DEPLOY_TOKEN /
+# DEPLOY_TARGET from the environment's secret and variable of those names.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of the plugin marketplace (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        type: string
+        required: true
+      base_branch:
+        type: string
+        default: main
+      jira_base_url:
+        type: string
+        default: ""
+      jira_user_email:
+        type: string
+        default: ""
+      release_file:
+        description: "Re-run for one merged record (releases/<version>.md); empty = records added in this push"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+      DEPLOY_TOKEN:
+        description: "Passed to deploy_command; an environment secret of the same name overrides it"
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  VALIDATE_RELEASE: .sdlc-plugin/plugins/sdlc/skills/release/scripts/validate_release.py
+  DEPLOY_CONFIG: .sdlc-plugin/plugins/sdlc/skills/release/scripts/deploy_config.py
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      file: ${{ steps.find.outputs.file }}
+      version: ${{ steps.find.outputs.version }}
+      commit: ${{ steps.find.outputs.commit }}
+      jira_keys: ${{ steps.find.outputs.jira_keys }}
+      deploy_command: ${{ steps.cfg.outputs.deploy_command }}
+      staging_environment: ${{ steps.cfg.outputs.staging_environment }}
+      production_environment: ${{ steps.cfg.outputs.production_environment }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Find and validate the release record
+        id: find
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          MANUAL_FILE: ${{ inputs.release_file }}
+        run: |
+          set -euo pipefail
+          if [ -n "$MANUAL_FILE" ]; then
+            [[ "$MANUAL_FILE" =~ ^releases/v[0-9]+\.[0-9]+\.[0-9]+\.md$ ]] || { echo "::error::release_file must look like releases/vX.Y.Z.md"; exit 1; }
+            files=("$MANUAL_FILE")
+          else
+            if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+              BEFORE="$AFTER^"
+            fi
+            mapfile -t files < <(git diff --name-only --diff-filter=A "$BEFORE" "$AFTER" -- 'releases/v*.md')
+          fi
+          if [ "${#files[@]}" -eq 0 ]; then echo "No new release record; nothing to release."; exit 0; fi
+          if [ "${#files[@]}" -gt 1 ]; then echo "::error::one release record per merge, got ${files[*]}"; exit 1; fi
+          f="${files[0]}"
+          python3 "$VALIDATE_RELEASE" --owners .sdlc/owners.yaml "$f"
+          python3 "$VALIDATE_RELEASE" --json "$f" > "$RUNNER_TEMP/release.json"
+          commit=$(jq -r .commit "$RUNNER_TEMP/release.json")
+          git merge-base --is-ancestor "$commit" "origin/${{ inputs.base_branch }}" \
+            || { echo "::error::commit $commit is not on ${{ inputs.base_branch }}"; exit 1; }
+          {
+            echo "file=$f"
+            echo "version=$(jq -r .version "$RUNNER_TEMP/release.json")"
+            echo "commit=$commit"
+            echo "jira_keys=$(jq -r '.jira_keys | join(" ")' "$RUNNER_TEMP/release.json")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Read .sdlc/deploy.yaml
+        id: cfg
+        run: python3 "$DEPLOY_CONFIG"
+
+  tag:
+    needs: detect
+    if: needs.detect.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+
+      - name: Create the tag and GitHub release
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERSION: ${{ needs.detect.outputs.version }}
+          COMMIT: ${{ needs.detect.outputs.commit }}
+          FILE: ${{ needs.detect.outputs.file }}
+        run: |
+          set -euo pipefail
+          if gh release view "$VERSION" >/dev/null 2>&1; then echo "::notice::$VERSION already released"; exit 0; fi
+          # Notes = the record without its frontmatter.
+          awk 'BEGIN{n=0} /^---$/{n++; next} n>=2' "$FILE" > "$RUNNER_TEMP/notes.md"
+          gh release create "$VERSION" --target "$COMMIT" --title "$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+
+  staging:
+    needs: [detect, tag]
+    if: needs.detect.outputs.deploy_command != '' && needs.detect.outputs.staging_environment != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ needs.detect.outputs.staging_environment }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect.outputs.commit }}
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Set up the project's stack
+        uses: ./.sdlc-plugin/.github/actions/setup-stack
+
+      - name: Deploy to staging
+        env:
+          CMD: ${{ needs.detect.outputs.deploy_command }}
+          SDLC_ENV: staging
+          SDLC_VERSION: ${{ needs.detect.outputs.version }}
+          SDLC_COMMIT: ${{ needs.detect.outputs.commit }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          DEPLOY_TARGET: ${{ vars.DEPLOY_TARGET }}
+        run: bash -euo pipefail -c "$CMD"
+
+  production:
+    needs: [detect, tag, staging]
+    # After staging (or with no staging), and only once the environment's reviewers approve.
+    if: always() && needs.tag.result == 'success' && needs.detect.outputs.deploy_command != '' && needs.detect.outputs.production_environment != '' && (needs.staging.result == 'success' || needs.staging.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ needs.detect.outputs.production_environment }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect.outputs.commit }}
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Set up the project's stack
+        uses: ./.sdlc-plugin/.github/actions/setup-stack
+
+      - name: Deploy to production
+        env:
+          CMD: ${{ needs.detect.outputs.deploy_command }}
+          SDLC_ENV: production
+          SDLC_VERSION: ${{ needs.detect.outputs.version }}
+          SDLC_COMMIT: ${{ needs.detect.outputs.commit }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          DEPLOY_TARGET: ${{ vars.DEPLOY_TARGET }}
+        run: bash -euo pipefail -c "$CMD"
+
+  jira:
+    needs: [detect, tag, production]
+    if: always() && needs.tag.result == 'success' && needs.detect.outputs.jira_keys != '' && inputs.jira_base_url != '' && needs.production.result != 'failure' && needs.production.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Comment the release on each story
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+          JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+          KEYS: ${{ needs.detect.outputs.jira_keys }}
+          VERSION: ${{ needs.detect.outputs.version }}
+          WHERE: ${{ needs.production.result == 'success' && 'production' || 'tagged (no production deploy)' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$JIRA_API_TOKEN" ]; then echo "::notice::Jira not configured; skipping."; exit 0; fi
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$VERSION"
+          for key in $KEYS; do
+            jq -n --arg b "Released in $VERSION ($WHERE): $url" '{body:$b}' | curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+              -H "Content-Type: application/json" -X POST --data @- "$JIRA_BASE_URL/rest/api/2/issue/$key/comment" >/dev/null
+            echo "Commented on $key"
+          done
