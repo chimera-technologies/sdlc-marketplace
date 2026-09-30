@@ -1,0 +1,29 @@
+<!doctype html>
+<!--
+  One screen of a design-ui mockup: designs/<slug>/mockups/<screen-id>.html.
+  Static and self-contained: CSS in <style>, images as data: URIs, no
+  <script>, no event handlers, no remote URLs (validate_design.py rejects
+  them; render_mockups.py renders with scripts and network blocked).
+  Set the viewport below (desktop 1280x800, phone 390x844). Put the
+  design's tokens in :root and reuse them in every screen of the design.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="sdlc-size" content="1280x800">
+<title>screen-id</title>
+<style>
+  :root {
+    --color-text: #1d2522; --color-muted: #5d6a65; --color-accent: #17715f;
+    --color-border: #d9dfdc; --color-surface: #ffffff; --color-page: #f4f6f5;
+    --space: 8px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--color-page); color: var(--color-text);
+         font: 16px/24px system-ui, "Segoe UI", Arial, sans-serif; }
+</style>
+</head>
+<body>
+  <!-- The screen, with the spec's real copy. -->
+</body>
+</html>

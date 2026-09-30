@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "plugins" / "sdlc" / "skills"
 SPEC = SKILLS / "write-spec" / "examples" / "claims-status-self-service.md"
 DESIGN = SKILLS / "design-ui" / "examples" / "claims-status-self-service"
+MOCKUP = SKILLS / "design-ui" / "examples" / "mockup" / "claims-status-self-service"
 PLAN = SKILLS / "build-story" / "examples" / "claims-status-self-service-s1.md"
 OWNERS = SKILLS / "write-intent" / "examples" / "owners.yaml"
 RENDER = SKILLS / "review-spec" / "scripts" / "render_review.py"
@@ -27,6 +28,7 @@ def load(name, path):
 
 vd = load("validate_design", SKILLS / "design-ui" / "scripts" / "validate_design.py")
 ex = load("export_screens", SKILLS / "design-ui" / "scripts" / "export_screens.py")
+rm = load("render_mockups", SKILLS / "design-ui" / "scripts" / "render_mockups.py")
 vp = load("validate_plan", SKILLS / "build-story" / "scripts" / "validate_plan.py")
 PNG = (DESIGN / "screens" / "claim-status-list.png").read_bytes()
 
@@ -157,6 +159,132 @@ class ExportScreensTest(DesignRepo):
                            capture_output=True, text=True, env=env)
         self.assertEqual(r.returncode, 1)
         self.assertIn("FIGMA_TOKEN is not set", r.stderr)
+
+
+class MockupRepo(DesignRepo):
+    """The same spec designed as HTML mockups (source: mockup)."""
+
+    def setUp(self):
+        super().setUp()
+        shutil.rmtree(self.manifest.parent)
+        shutil.copytree(MOCKUP, self.manifest.parent)
+        self.text = self.manifest.read_text(encoding="utf-8")
+        self.list_html = self.manifest.parent / "mockups" / "claim-status-list.html"
+
+
+class ValidateMockupTest(MockupRepo):
+    def test_example_is_valid(self):
+        fm, errors, warnings = self.check()
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+        self.assertEqual(fm["source"], "mockup")
+
+    def test_figma_keys_not_needed(self):
+        text = self.text.replace("figma_file: none\n", "").replace("figma_file_key: none\n", "")
+        self.assertEqual(self.check(text)[1], [])
+
+    def test_figma_source_still_needs_them(self):
+        _, errors, _ = self.check(self.text.replace("source: mockup", "source: figma"))
+        self.assertError(errors, "Figma node must look like 1:2")
+        self.assertError(errors, "figma_file must be a https://www.figma.com")
+
+    def test_unknown_source(self):
+        self.assertError(self.check(self.text.replace("source: mockup", "source: sketch"))[1], "source must be one of")
+
+    def test_source_path_must_match_screen(self):
+        _, errors, _ = self.check(self.text.replace("| mockups/claim-status-empty.html |", "| mockups/empty.html |"))
+        self.assertError(errors, "source must be mockups/claim-status-empty.html")
+
+    def test_missing_mockup(self):
+        self.list_html.unlink()
+        self.assertError(self.check()[1], "claim-status-list.html not found")
+
+    def test_missing_png_points_to_the_renderer(self):
+        (self.manifest.parent / "screens" / "claim-status-list.png").unlink()
+        self.assertError(self.check()[1], "run render_mockups.py")
+
+    def test_unsafe_mockups_are_rejected(self):
+        html = self.list_html.read_text(encoding="utf-8")
+        for bad, fragment in [
+            ("<script>alert(1)</script>", "<script"),
+            ('<img src="https://cdn.example/logo.png">', "remote resources"),
+            ('<link rel="stylesheet" href="//fonts.example/a.css">', "remote resources"),
+            ("<style>@import 'https://x.example/a.css';</style>", "remote resources"),
+            ("<style>body{background:url(http://x.example/a.png)}</style>", "remote resources"),
+            ('<button onclick="go()">Go</button>', "event handlers"),
+            ('<a href="javascript:go()">Go</a>', "javascript:"),
+            ('<iframe src="a.html"></iframe>', "<iframe"),
+        ]:
+            with self.subTest(bad=bad):
+                self.list_html.write_text(html.replace("</main>", bad + "</main>"), encoding="utf-8")
+                self.assertError(self.check()[1], fragment)
+        self.list_html.write_text(html.replace("</main>", '<img src="data:image/png;base64,iVBOR" alt="">'
+                                               '<a href="#top">Top</a></main>'), encoding="utf-8")
+        self.assertEqual(self.check()[1], [])
+
+    def test_size_meta(self):
+        self.assertEqual(vd.mockup_size('<meta name="sdlc-size" content="390x844">'), (390, 844))
+        self.assertEqual(vd.mockup_size("<html></html>"), (1280, 800))
+
+
+class RenderMockupsTest(MockupRepo):
+    def fake_browser(self, calls, write=True):
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            out = next(a.split("=", 1)[1] for a in cmd if a.startswith("--screenshot="))
+            if write:
+                Path(out).write_bytes(PNG)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return run
+
+    def test_renders_every_screen_locked_down(self):
+        for p in (self.manifest.parent / "screens").glob("*.png"):
+            p.unlink()
+        calls = []
+        written = rm.render(self.manifest, "chrome", self.fake_browser(calls))
+        self.assertEqual([w[0] for w in written], ["claim-status-list", "claim-status-empty"])
+        self.assertEqual(self.check()[1], [])
+        cmd = calls[0]
+        self.assertIn("--headless=new", cmd)
+        self.assertIn("--window-size=1280,800", cmd)
+        self.assertIn("--proxy-server=127.0.0.1:9", cmd)
+        # The browser gets a locked copy, never the mockup itself.
+        self.assertNotIn(self.list_html.resolve().as_uri(), cmd)
+
+    def test_locked_copy_blocks_scripts_and_loads(self):
+        locked = rm.locked_copy("<html><head><title>x</title></head><body></body></html>")
+        self.assertTrue(locked.startswith("<html><head><meta http-equiv=\"Content-Security-Policy\""))
+        self.assertIn("default-src 'none'", locked)
+        self.assertIn("Content-Security-Policy", rm.locked_copy("<html><body></body></html>"))
+
+    def test_no_png_is_an_error(self):
+        with self.assertRaises(SystemExit) as cm:
+            rm.render(self.manifest, "chrome", self.fake_browser([], write=False))
+        self.assertIn("browser wrote no PNG", str(cm.exception))
+
+    def test_unsafe_mockup_is_not_rendered(self):
+        self.list_html.write_text("<html><body><script>x()</script></body></html>", encoding="utf-8")
+        calls = []
+        with self.assertRaises(SystemExit):
+            rm.render(self.manifest, "chrome", self.fake_browser(calls))
+        self.assertEqual(calls, [])
+
+    def test_figma_manifest_is_refused_and_vice_versa(self):
+        figma = self.root / "designs" / "figma" / "design.md"
+        figma.parent.mkdir(parents=True)
+        shutil.copy(DESIGN / "design.md", figma)
+        with self.assertRaises(SystemExit):
+            rm.plan_renders(figma)
+        with self.assertRaises(SystemExit) as cm:
+            ex.plan_exports(self.manifest)
+        self.assertIn("render_mockups.py", str(cm.exception))
+
+    @unittest.skipUnless(rm.find_browser(), "no Chrome, Chromium or Edge on this machine")
+    def test_real_browser_renders_pngs(self):
+        for p in (self.manifest.parent / "screens").glob("*.png"):
+            p.unlink()
+        rm.render(self.manifest, rm.find_browser())
+        self.assertEqual(self.check()[1], [])
 
 
 class PlanDesignRuleTest(DesignRepo):

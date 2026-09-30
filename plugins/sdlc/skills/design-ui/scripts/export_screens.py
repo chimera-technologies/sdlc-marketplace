@@ -48,7 +48,10 @@ def plan_exports(manifest):
     """(file_key, [(screen, api_node_id, out_path)]) from the manifest."""
     text = Path(manifest).read_text(encoding="utf-8")
     fm, body = vd.vi.parse_frontmatter(text)
-    if not fm or not fm.get("figma_file_key"):
+    if fm and fm.get("source") == "mockup":
+        raise SystemExit("manifest is source: mockup; render it with render_mockups.py, "
+                         "or import it into Figma first (/sdlc:design-ui from=mockups)")
+    if not fm or not fm.get("figma_file_key") or fm["figma_file_key"] == "none":
         raise SystemExit("manifest has no figma_file_key")
     rows = vd.parse_screens(body)
     if not rows:

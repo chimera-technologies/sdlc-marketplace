@@ -1,6 +1,7 @@
 ---
 id: claims-status-self-service
 spec: specs/claims-status-self-service.md
+source: figma
 figma_file: https://www.figma.com/design/AbC123exampleKey/claims-status-self-service-UI
 figma_file_key: AbC123exampleKey
 owner: "@claims-po"
@@ -10,7 +11,7 @@ created: 2026-09-29
 # Design: Let customers check claim status themselves
 
 ## Screens
-| Screen | Figma node | Screenshot | Stories | Requirements |
+| Screen | Source | Screenshot | Stories | Requirements |
 |---|---|---|---|---|
 | claim-status-list | 12:34 | screens/claim-status-list.png | S3 | REQ-1, REQ-2 |
 | claim-status-empty | 12:58 | screens/claim-status-empty.png | S3 | REQ-1 |

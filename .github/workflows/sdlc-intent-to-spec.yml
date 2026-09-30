@@ -1,6 +1,6 @@
 name: "SDLC Design: intent to spec"
 
-# Reusable workflow of the sdlc plugin (workflow_call). Plan -> Design: draft specs/<slug>.md for each merged intent (sdlc:write-spec, sdlc:review-spec).
+# Reusable workflow of the sdlc plugin (workflow_call). Plan -> Design: draft specs/<slug>.md and its UI mockups for each merged intent (sdlc:write-spec, sdlc:review-spec, sdlc:design-ui).
 # Projects call it from the .github/workflows/sdlc-*.yml files that
 # /sdlc:init writes, pinned to the same tag as sdlc_ref.
 #
@@ -12,8 +12,13 @@ name: "SDLC Design: intent to spec"
 # 2. validate_spec.py checks it (draft PR if invalid).
 # 3. sdlc:review-spec pre-screens it in a fresh Claude session; the findings
 #    go in the PR body (a screen, not an approval).
-# 4. The PR requests the owner, plus the tech lead when risk is high.
-# Merging the spec PR creates the Jira stories (spec-to-stories.yml).
+# 4. ui_design: sdlc:design-ui writes HTML mockups of every screen
+#    (designs/<slug>/), render_mockups.py screenshots them with headless
+#    Chrome, validate_design.py checks them. A design that fails is left out
+#    of the PR (kept as a run artifact) so the spec stays mergeable.
+# 5. The PR requests the owner, plus the tech lead when risk is high.
+# Merging the spec PR accepts the spec and its mockups, and creates the Jira
+# stories (spec-to-stories.yml).
 #
 # Runs the Claude CLI directly: anthropics/claude-code-action does not
 # support the push event.
@@ -53,6 +58,10 @@ on:
         description: "Re-run for one merged intent (intent/<slug>.md); empty = intents changed in this push"
         type: string
         default: ""
+      ui_design:
+        description: "Also draft HTML mockups of every screen (designs/<slug>/) into the spec PR"
+        type: boolean
+        default: false
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
@@ -73,6 +82,8 @@ env:
   VALIDATE: .sdlc-plugin/plugins/sdlc/skills/write-intent/scripts/validate_intent.py
   VALIDATE_SPEC: .sdlc-plugin/plugins/sdlc/skills/write-spec/scripts/validate_spec.py
   RENDER_REVIEW: .sdlc-plugin/plugins/sdlc/skills/review-spec/scripts/render_review.py
+  VALIDATE_DESIGN: .sdlc-plugin/plugins/sdlc/skills/design-ui/scripts/validate_design.py
+  RENDER_MOCKUPS: .sdlc-plugin/plugins/sdlc/skills/design-ui/scripts/render_mockups.py
   MODEL: ${{ inputs.model }}
 
 jobs:
@@ -113,7 +124,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.files != '[]'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -233,6 +244,60 @@ jobs:
             > "$RUNNER_TEMP/review-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
 
+      - name: Draft UI mockups with design-ui skill (headless)
+        id: design
+        if: inputs.ui_design && steps.check.outputs.valid == 'true'
+        continue-on-error: true   # a failed design is left out of the PR, not a failed run
+        env:
+          SDLC_WRITE_ALLOW: "designs/"
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          set -euo pipefail
+          # Fresh session again; it reads the spec file, writes HTML only.
+          claude -p "/sdlc:design-ui mode=headless spec=specs/$SLUG.md" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --model "$MODEL" \
+            --max-turns 60 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Edit,Bash(python3 *validate_design.py*)" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/design-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/design-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Render and validate the UI mockups
+        id: mockups
+        env:
+          UI_DESIGN: ${{ inputs.ui_design }}
+          DESIGN_OUTCOME: ${{ steps.design.outcome }}
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          set -uo pipefail
+          dir="designs/${SLUG:?}"; m="$dir/design.md"; status=off
+          if [ "$UI_DESIGN" = "true" ] && [ "$DESIGN_OUTCOME" != "skipped" ]; then
+            status=none   # the skill decided the spec has no screens
+            if [ -f "$m" ]; then
+              # Deterministic: headless Chrome, scripts and network blocked.
+              if python3 "$RENDER_MOCKUPS" "$m" > "$RUNNER_TEMP/design-validation.txt" 2>&1 \
+                 && python3 "$VALIDATE_DESIGN" --owners .sdlc/owners.yaml "$m" >> "$RUNNER_TEMP/design-validation.txt" 2>&1; then
+                status=ok
+              else
+                status=failed
+              fi
+              cat "$RUNNER_TEMP/design-validation.txt"
+            elif [ "$DESIGN_OUTCOME" = "failure" ]; then
+              status=failed
+            fi
+            if [ "$status" = "failed" ] && [ -d "$dir" ]; then
+              # Keep the spec PR mergeable: the broken design goes to the run's artifacts.
+              mkdir -p "$RUNNER_TEMP/design-failed" && cp -r "$dir" "$RUNNER_TEMP/design-failed/" && rm -rf "$dir"
+            fi
+          fi
+          echo "UI design: $status"
+          {
+            echo "status=$status"
+            echo "paths<<SDLC_EOF"; echo "specs/$SLUG.md"; [ "$status" = "ok" ] && echo "$dir/"; echo "SDLC_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build PR body
         id: body
         env:
@@ -242,6 +307,7 @@ jobs:
           OWNER: ${{ steps.check.outputs.owner }}
           LEAD: ${{ steps.check.outputs.tech_lead }}
           RECORD: ${{ steps.check.outputs.record_id }}
+          DESIGN: ${{ steps.mockups.outputs.status }}
         run: |
           set -euo pipefail
           verdict=$(python3 "$RENDER_REVIEW" .sdlc-output/spec-review.json --markdown "$RUNNER_TEMP/review.md")
@@ -256,6 +322,26 @@ jobs:
               echo '```'; cat "$RUNNER_TEMP/validation.txt"; echo '```'; echo
             fi
             cat "$RUNNER_TEMP/review.md"; echo
+            case "$DESIGN" in
+              ok)
+                echo "### UI design"
+                echo "HTML mockups of every screen, rendered in CI: \`designs/$SLUG/\`. Merging accepts them with the spec; Build implements against them."
+                echo "To refine them in Figma: \`/sdlc:design-ui spec=specs/$SLUG.md from=mockups\` (opens a design PR)."
+                echo
+                for png in "designs/$SLUG"/screens/*.png; do
+                  name=$(basename "$png" .png)
+                  echo "**$name**"; echo
+                  echo "![$name]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/spec/$SLUG/$png?raw=true)"; echo
+                done ;;
+              failed)
+                echo "> [!WARNING]"
+                echo "> UI mockups could not be made; they are not in this PR (see the run's \`design-failed\` artifact)."
+                echo "> After merging, run \`/sdlc:design-ui spec=specs/$SLUG.md to=mockup\` and open a design PR."
+                echo ;;
+              none)
+                echo "### UI design"
+                echo "No user-facing screens in this spec, so no mockups."; echo ;;
+            esac
             echo "### Review checklist"
             echo "- [ ] Solves the problem stated in the intent ($OWNER)"
             echo "- [ ] Tech stack decision is right (${LEAD:-tech lead})"
@@ -263,12 +349,15 @@ jobs:
             echo "- [ ] Areas of concern decided with the named owner"
             echo "- [ ] Pre-screen findings resolved or consciously accepted"
             echo "- [ ] Stories are the right size to build and test"
+            if [ "$DESIGN" = "ok" ]; then echo "- [ ] UI mockups show every story's screens and states ($OWNER)"; fi
             if [ "$RISK" = "high" ]; then echo "- [ ] Risk \`high\`: tech lead has approved"; fi
             echo
             echo "<details><summary>Evidence</summary>"
             echo
             echo "- Intent: \`$INTENT_FILE\` @ \`$GITHUB_SHA\`"
-            echo "- Skills: sdlc:write-spec, sdlc:review-spec @ \`${{ inputs.sdlc_repo }}@${{ inputs.sdlc_ref }}\`"
+            skills="sdlc:write-spec, sdlc:review-spec"
+            if [ "$DESIGN" != "off" ]; then skills="$skills, sdlc:design-ui"; fi
+            echo "- Skills: $skills @ \`${{ inputs.sdlc_repo }}@${{ inputs.sdlc_ref }}\`"
             echo "- Model: $MODEL"
             echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (transcript artifacts)"
             echo "</details>"
@@ -282,6 +371,9 @@ jobs:
           path: |
             ${{ runner.temp }}/spec-transcript.jsonl
             ${{ runner.temp }}/review-transcript.jsonl
+            ${{ runner.temp }}/design-transcript.jsonl
+            ${{ runner.temp }}/design-validation.txt
+            ${{ runner.temp }}/design-failed/
             .sdlc-output/spec-review.json
           if-no-files-found: ignore
           retention-days: 90
@@ -292,7 +384,7 @@ jobs:
           token: ${{ steps.app.outputs.token }}
           branch: spec/${{ steps.meta.outputs.slug }}
           base: ${{ inputs.base_branch }}
-          add-paths: specs/${{ steps.meta.outputs.slug }}.md
+          add-paths: ${{ steps.mockups.outputs.paths }}
           commit-message: |
             spec: ${{ steps.meta.outputs.slug }}
 

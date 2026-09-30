@@ -151,6 +151,14 @@ class InitTest(unittest.TestCase):
         self.assertNotIn("design-check", pr)
         settings = json.loads(self.read(".claude/settings.json"))
         self.assertNotIn("figma@claude-plugins-official", settings["enabledPlugins"])
+        self.assertNotIn("ui_design", self.read(".github/workflows/sdlc-push.yml"))
+
+    def test_ui_design_mockups_come_with_the_spec(self):
+        self.run_init()
+        push = self.read(".github/workflows/sdlc-push.yml")
+        job = push.split("  intent-to-spec:\n", 1)[1].split("\n  spec-to-stories:", 1)[0]
+        self.assertIn("      ui_design: true\n", job)
+        self.assertIn("automatic with the spec", self.read("CLAUDE.md"))
 
     def test_jira_off(self):
         self.run_init({**ANSWERS, "jira": {"enabled": False}})

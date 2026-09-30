@@ -115,4 +115,4 @@ check without sending anything: `python <plugin>/skills/triage/scripts/run_check
 | `JIRA_BASE_URL`, `JIRA_USER_EMAIL` | variables | Jira (if enabled) |
 | `JIRA_API_TOKEN` | secret | Jira (if enabled) |
 | `DEPLOY_TOKEN` / `DEPLOY_TARGET` | secret / variable, per environment | `deploy_command` |
-| `FIGMA_TOKEN` | environment variable on the designer's machine | UI design PNG export |
+| `FIGMA_TOKEN` | environment variable on the designer's machine | PNG export after refining the mockups in Figma (not needed for the automatic mockups) |

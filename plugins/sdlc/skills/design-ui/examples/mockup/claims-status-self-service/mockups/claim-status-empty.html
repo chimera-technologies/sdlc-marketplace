@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="sdlc-size" content="1280x800">
+<title>claim-status-empty</title>
+<style>
+  :root {
+    --color-text: #1d2522; --color-muted: #5d6a65; --color-accent: #17715f;
+    --color-border: #d9dfdc; --color-surface: #ffffff; --color-page: #f4f6f5;
+    --space: 8px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--color-page); color: var(--color-text);
+         font: 16px/24px "IBM Plex Sans", "Segoe UI", Arial, sans-serif; }
+  header { background: var(--color-surface); border-bottom: 1px solid var(--color-border);
+           padding: calc(var(--space) * 2) calc(var(--space) * 4); font-weight: 600; }
+  main { width: 720px; margin: calc(var(--space) * 5) auto; }
+  h1 { font-size: 28px; line-height: 36px; margin: 0 0 var(--space); }
+  .empty { background: var(--color-surface); border: 1px dashed var(--color-border); border-radius: 8px;
+           padding: calc(var(--space) * 5); text-align: center; color: var(--color-muted); }
+  .empty strong { display: block; color: var(--color-text); margin-bottom: var(--space); }
+</style>
+</head>
+<body>
+<header>Acme Insurance &middot; My claims</header>
+<main>
+  <h1>Your open claims</h1>
+  <div class="empty">
+    <strong>You have no open claims</strong>
+    Claims you make will appear here with their status and what happens next.
+  </div>
+</main>
+</body>
+</html>

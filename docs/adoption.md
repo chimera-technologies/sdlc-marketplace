@@ -42,8 +42,10 @@ on the marketplace repo (or someone who has it).
    (Settings > Environments), give `production` required reviewers, add
    `DEPLOY_TOKEN` / `DEPLOY_TARGET` if your `deploy_command` needs them, and
    set `deploy_command` in `.sdlc/deploy.yaml`.
-8. **UI design** (if on): each designer trusts the repo so the Figma plugin
-   installs, logs in with `/mcp`, and sets `FIGMA_TOKEN` for PNG export.
+8. **UI design** (if on): nothing to set up for the automatic mockups. To
+   refine them in Figma, a designer trusts the repo so the Figma plugin
+   installs, logs in with `/mcp`, sets `FIGMA_TOKEN` for PNG export, and
+   runs `/sdlc:design-ui spec=specs/<slug>.md from=mockups`.
 
 ## 3. First run
 

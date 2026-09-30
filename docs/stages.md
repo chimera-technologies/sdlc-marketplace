@@ -8,7 +8,7 @@ workflows check it; hooks enforce what must always hold.
 |---|---|---|---|---|---|---|
 | 1 | Plan | `/sdlc:write-intent`, a Jira ticket labelled `intent`, or a Maintain breach | `intent/<slug>.md` | `write-intent` | `sdlc-intake`, `sdlc-intent-check` | owner merges (`intent-check / validate`) |
 | 2 | Design: spec | automatic when an intent merges | `specs/<slug>.md` | `write-spec`, `review-spec` | `sdlc-intent-to-spec`, `sdlc-spec-check`, `sdlc-spec-to-stories` | owner (+ tech lead if risk is high) merges (`spec-check / validate`) |
-| 2b | Design: UI | `/sdlc:design-ui spec=specs/<slug>.md` | `designs/<slug>/design.md` + `screens/*.png` | `design-ui` | `sdlc-design-check` | owner merges (`design-check / validate`) |
+| 2b | Design: UI | automatic with the spec (HTML mockups); `/sdlc:design-ui` to redo them or refine them in Figma | `designs/<slug>/design.md` + `mockups/*.html` + `screens/*.png` | `design-ui` | `sdlc-intent-to-spec`, `sdlc-design-check` | owner merges the spec PR, or a design PR (`design-check / validate`) |
 | 3 | Build | `/sdlc:build-story <KEY>` | `plans/<slug>-s<n>.md`, code, tests | `build-story`, agent `verifier` | (interactive) | plan approved in plan mode; verifier PASS |
 | 4 | PR review | a story PR is opened or pushed | review comment, `review:*` label | `review-story` + advisory reviewers | `sdlc-pr` | `pr / review-gate` |
 | 5 | Test | after the review gate passes | test results | (project tests) | `sdlc-pr`, `sdlc-main-tests` | `pr / traceability`, `pr / e2e`; owner merges |
@@ -19,8 +19,8 @@ workflows check it; hooks enforce what must always hold.
 
 ```
 Jira ticket / document / breach
-  -> Plan: intent PR --merge--> Design: spec PR (pre-screened) --merge--> Jira stories
-                                   \-> UI design: design PR (screens as PNGs)
+  -> Plan: intent PR --merge--> Design: spec PR (pre-screened, with UI mockups) --merge--> Jira stories
+                                   \-> optional: /sdlc:design-ui from=mockups -> Figma -> design PR
   -> Build: /sdlc:build-story (preflight, plan, tests first, verifier) -> story PR
   -> PR review: review-gate (+ advisory) -> Test: traceability + tests -> merge -> Jira story Done
   -> Deploy: /sdlc:release -> release PR --merge--> tag -> staging -> production (approved)
@@ -35,8 +35,14 @@ Jira ticket / document / breach
 - **Design**: every intent open question carried into the spec; the stack
   decided in "Technology and architecture"; an adversarial pre-screen in a
   fresh session; stories created only from a merged, valid spec.
-- **UI design**: every spec story on a screen or listed as "No UI"; one PNG
-  per screen stored in the repo; later plans must name their screens.
+- **UI design**: made with every spec, no accounts needed: one static HTML
+  mockup per screen, rendered to PNG by headless Chrome with scripts and
+  network blocked. Every spec story on a screen or listed as "No UI"; one
+  PNG per screen stored in the repo; later plans must name their screens. A
+  design that fails validation is left out of the spec PR, never blocks it.
+  Figma is optional: `/sdlc:design-ui from=mockups` imports the mockups for a
+  designer, and the design PR replaces the PNGs with Figma exports. (CI
+  cannot drive Figma: its MCP server accepts only a person's OAuth login.)
 - **Build**: the build guard blocks code until the preflight (Graphify and
   Ponytail), the story branch and the approved plan exist; every acceptance
   criterion maps to a named test; an independent verifier on a smaller model.

@@ -1,8 +1,9 @@
 ---
 id: <spec-slug>
 spec: specs/<spec-slug>.md
-figma_file: <https://www.figma.com/design/<FILE_KEY>/<name>>
-figma_file_key: <FILE_KEY>
+source: <mockup (HTML mockups in mockups/) or figma (frames in a Figma file)>
+figma_file: <https://www.figma.com/design/<FILE_KEY>/<name>, or none for mockup>
+figma_file_key: <FILE_KEY, or none for mockup>
 owner: "<@github-handle or @org/team: the spec's owner>"
 created: <YYYY-MM-DD>
 ---
@@ -10,9 +11,9 @@ created: <YYYY-MM-DD>
 # Design: <short title>
 
 ## Screens
-| Screen | Figma node | Screenshot | Stories | Requirements |
+| Screen | Source | Screenshot | Stories | Requirements |
 |---|---|---|---|---|
-| <screen-id, kebab-case> | <node id, e.g. 1:2> | screens/<screen-id>.png | <S1, S2> | <REQ-1, REQ-2> |
+| <screen-id, kebab-case> | <mockups/<screen-id>.html, or the Figma node id, e.g. 1:2> | screens/<screen-id>.png | <S1, S2> | <REQ-1, REQ-2> |
 
 ## States
 <Empty, error, validation and warning states the screens show, one bullet

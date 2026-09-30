@@ -54,6 +54,15 @@ jobs:
           python plugins/sdlc/skills/design-ui/scripts/validate_design.py \
             --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \
             --root "$d" "$d/designs/claims-status-self-service/design.md"
+          # The mockup example of the same design, re-rendered with the runner's Chrome.
+          m=$(mktemp -d); mkdir -p "$m/specs" "$m/designs"
+          cp plugins/sdlc/skills/write-spec/examples/claims-status-self-service.md "$m/specs/"
+          cp -r plugins/sdlc/skills/design-ui/examples/mockup/claims-status-self-service "$m/designs/"
+          rm -f "$m"/designs/claims-status-self-service/screens/*.png
+          python plugins/sdlc/skills/design-ui/scripts/render_mockups.py "$m/designs/claims-status-self-service/design.md"
+          python plugins/sdlc/skills/design-ui/scripts/validate_design.py \
+            --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \
+            --root "$m" "$m/designs/claims-status-self-service/design.md"
           # The example release record.
           python plugins/sdlc/skills/release/scripts/validate_release.py \
             --owners plugins/sdlc/skills/write-intent/examples/owners.yaml \

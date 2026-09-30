@@ -15,7 +15,7 @@ Adopt it in a project in one command, **`/sdlc:init`**, then follow
 |---|---|---|---|
 | Plan | `/sdlc:write-intent`, or label a Jira ticket `intent` | `intent/<slug>.md` (+ a Jira Epic) | the owner merging the intent PR |
 | Design | automatic when an intent merges | `specs/<slug>.md`: requirements, **stack decision**, stories; pre-screened by an adversarial reviewer | owner (+ tech lead for high risk); stories then appear in Jira |
-| UI design | `/sdlc:design-ui spec=specs/<slug>.md` | screens in Figma, a PNG of each in `designs/<slug>/screens/` | owner merging the design PR |
+| UI design | automatic with the spec; `/sdlc:design-ui from=mockups` to refine in Figma | HTML mockups and a PNG of each screen in `designs/<slug>/` | owner merging the spec PR (or a design PR) |
 | Build | `/sdlc:build-story <KEY>` | plan, tests first, code, independent verifier | plan approved in plan mode |
 | PR review | opening the story PR | conformance review gate + Anthropic `code-review` (+ your own reviewers) | the gate, then the owner |
 | Test | after the review gate | your project's tests, on your toolchain | green checks |
