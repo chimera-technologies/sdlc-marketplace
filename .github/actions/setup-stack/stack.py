@@ -72,11 +72,16 @@ def main():
     ap.add_argument("--require-tests", action="store_true", help="fail if test_command is missing")
     ap.add_argument("--skip-without-code", action="store_true",
                     help="output an empty stack (nothing installed or run) if no code_paths exist yet")
+    ap.add_argument("--install-if-code", action="store_true",
+                    help="toolchains always, but no install_command until code_paths exist (the build of a first story)")
     args = ap.parse_args()
     out, errors = read_stack(args.root)
     if args.skip_without_code and not args.require_tests and not has_code(args.root):
         out = {k: "" for k in out}
         print("No code under code_paths yet; nothing to install or test.", file=sys.stderr)
+    elif args.install_if_code and not has_code(args.root):
+        out["install_command"] = ""
+        print("No code under code_paths yet; toolchains only, no install_command.", file=sys.stderr)
     if args.require_tests and not out["test_command"]:
         errors.append("no test_command in .sdlc/build.yaml: record the stack with /sdlc:init stack=specs/<slug>.md")
     for e in errors:

@@ -1,0 +1,475 @@
+name: "SDLC Build: plan and build stories"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Automatic Build: for each accepted spec, plan the next story in a plan PR, then build it once the plan merges.
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# Runs on every push to the base branch. next_story.py reads git and the PR
+# list and picks, per spec, the first story that is not done:
+#   plan  -> sdlc:build-story mode=plan writes plans/<slug>-s<n>.md; opened
+#            as a PR on plan/<slug>-s<n>. Merging it approves the plan.
+#   build -> sdlc:build-story mode=build follows the merged plan on its
+#            story branch: preflight (Graphify, Ponytail), tests first,
+#            implement, verifier. Opened as the story PR (draft if the build
+#            is incomplete); PR review and Test then run as for any story PR.
+# Merging the story PR starts the next story. One story per spec in flight,
+# so stories build in order and never conflict.
+#
+# Claude holds no GitHub or Jira token: checkouts do not persist
+# credentials, and the App token is only used by the PR steps.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+      model:
+        description: "Claude model for planning and building"
+        type: string
+        default: claude-opus-5-5
+      spec_file:
+        description: "Only this spec (specs/<slug>.md); empty = every spec"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+# One decision at a time: two pushes in a row must not plan the same story twice.
+concurrency:
+  group: sdlc-build-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
+  SCRIPTS: .sdlc-plugin/plugins/sdlc/skills/build-story/scripts
+  VALIDATE_SPEC: .sdlc-plugin/plugins/sdlc/skills/write-spec/scripts/validate_spec.py
+  MODEL: ${{ inputs.model }}
+  JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+  JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+
+jobs:
+  next:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      plan: ${{ steps.decide.outputs.plan }}
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch }}
+          persist-credentials: false
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+          persist-credentials: false
+
+      - name: Decide the next step per spec
+        id: decide
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SPEC: ${{ inputs.spec_file }}
+        run: |
+          set -euo pipefail
+          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit 1000 --json headRefName,state > "$RUNNER_TEMP/prs.json"
+          python3 "$SCRIPTS/next_story.py" --prs "$RUNNER_TEMP/prs.json" ${SPEC:+--spec "$SPEC"} > "$RUNNER_TEMP/next.json"
+          {
+            echo "### Automatic Build"
+            jq -r '.actions[] | "- **\(.action)** \(.id): \(.story) \(.title)"' "$RUNNER_TEMP/next.json"
+            jq -r '.waiting[] | "- waiting: \(.id // .spec): \(.reason)"' "$RUNNER_TEMP/next.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
+          {
+            echo "plan=$(jq -c '[.actions[] | select(.action == "plan")]' "$RUNNER_TEMP/next.json")"
+            echo "build=$(jq -c '[.actions[] | select(.action == "build")]' "$RUNNER_TEMP/next.json")"
+          } >> "$GITHUB_OUTPUT"
+
+  plan:
+    needs: next
+    if: needs.next.outputs.plan != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        item: ${{ fromJSON(needs.next.outputs.plan) }}
+    env:
+      SDLC_HEADLESS: "1"
+      SDLC_WRITE_ALLOW: "plans/"
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ID: ${{ matrix.item.id }}
+      SPEC: ${{ matrix.item.spec }}
+      STORY: ${{ matrix.item.story }}
+      TITLE: ${{ matrix.item.title }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch }}
+          persist-credentials: false
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Preflight (Graphify graph of the current code)
+        run: |
+          # Exit 3 only means Ponytail is not active yet; planning does not need it.
+          python3 "$SCRIPTS/build_preflight.py" || [ $? -eq 3 ]
+
+      - name: Find the story's Jira key
+        id: jira
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          SLUG: ${{ matrix.item.slug }}
+        run: |
+          set -euo pipefail
+          key=none
+          if [ -n "$JIRA_API_TOKEN" ] && [ -n "$JIRA_BASE_URL" ]; then
+            label="spec-$SLUG-$(tr '[:upper:]' '[:lower:]' <<<"$STORY")"
+            jql=$(jq -rn --arg l "$label" '"labels = \"\($l)\"" | @uri')
+            key=$(curl -fsS -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" "$JIRA_BASE_URL/rest/api/3/search/jql?jql=$jql&fields=key&maxResults=1" \
+                  | jq -r '.issues[0].key // "none"') || key=none
+          fi
+          echo "Jira key for $ID: $key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Plan the story with build-story (headless)
+        env:
+          JIRA_KEY: ${{ steps.jira.outputs.key }}
+        run: |
+          set -euo pipefail
+          mkdir -p plans .sdlc-output
+          claude -p "/sdlc:build-story mode=plan spec=$SPEC story=$STORY jira=$JIRA_KEY" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --model "$MODEL" \
+            --max-turns 80 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Edit,Bash(python3 *validate_plan.py*),Bash(python3 *build_preflight.py*),Bash(graphify *),Bash(python3 -m graphify *)" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/plan-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/plan-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+          [ -s "plans/$ID.md" ] || { echo "::error::Claude did not write plans/$ID.md"; exit 1; }
+
+      - name: Validate the plan and build the PR body
+        id: check
+        run: |
+          set -euo pipefail
+          if python3 "$SCRIPTS/validate_plan.py" "plans/$ID.md" 2> "$RUNNER_TEMP/validation.txt"; then valid=true; else valid=false; fi
+          cat "$RUNNER_TEMP/validation.txt"
+          python3 "$VALIDATE_SPEC" --json "$SPEC" > "$RUNNER_TEMP/spec.json" 2>/dev/null || echo '{}' > "$RUNNER_TEMP/spec.json"
+          owner=$(jq -r '.owner // ""' "$RUNNER_TEMP/spec.json")
+          branch=$(sed -n 's/^branch:[[:space:]]*//p' "plans/$ID.md" | head -n1)
+          {
+            echo "Plan for **$STORY: $TITLE** of \`$SPEC\`: \`plans/$ID.md\`."
+            echo
+            echo "**Merge to approve the plan: the build starts automatically** on \`$branch\` and opens the story PR. Close with a reason to reject; edit the plan on this branch to change it."
+            echo
+            if [ "$valid" = "false" ]; then
+              echo "> [!WARNING]"; echo "> Validation failed; opened as draft. Fix before merging:"
+              echo '```'; cat "$RUNNER_TEMP/validation.txt"; echo '```'; echo
+            fi
+            echo "### Review checklist"
+            echo "- [ ] Every acceptance criterion has a test, in order"
+            echo "- [ ] The files and steps are the smallest change that meets the story"
+            echo "- [ ] The Design section names this story's screens (if it has any)"
+            echo "- [ ] Decisions to confirm (Risks and rollback) are answered"
+            echo
+            echo "<details><summary>Evidence</summary>"
+            echo
+            echo "- Skill: sdlc:build-story mode=plan @ \`${{ inputs.sdlc_repo }}@${{ inputs.sdlc_ref }}\`"
+            echo "- Model: $MODEL"
+            echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (transcript artifact)"
+            echo "</details>"
+          } > "$RUNNER_TEMP/pr-body.md"
+          reviewer=${owner#@}; [[ "$reviewer" == */* ]] && reviewer=""   # teams are routed by CODEOWNERS, not here
+          { echo "valid=$valid"; echo "reviewer=$reviewer"; } >> "$GITHUB_OUTPUT"
+
+      - name: Upload transcript (evidence)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-transcript-${{ matrix.item.id }}
+          path: ${{ runner.temp }}/plan-transcript.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Open the plan PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+          branch: plan/${{ matrix.item.id }}
+          base: ${{ inputs.base_branch }}
+          add-paths: plans/${{ matrix.item.id }}.md
+          commit-message: |
+            plan: ${{ matrix.item.id }} (${{ matrix.item.story }} ${{ matrix.item.title }})
+
+            From ${{ matrix.item.spec }} @ ${{ github.sha }}
+          title: "plan: ${{ matrix.item.story }} ${{ matrix.item.title }}"
+          body-path: ${{ runner.temp }}/pr-body.md
+          draft: ${{ steps.check.outputs.valid == 'false' }}
+          labels: plan
+          reviewers: ${{ steps.check.outputs.reviewer }}
+
+  build:
+    needs: next
+    if: needs.next.outputs.build != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        item: ${{ fromJSON(needs.next.outputs.build) }}
+    env:
+      SDLC_HEADLESS: "1"
+      # Code may go anywhere the stack needs it; the SDLC's own files may not change.
+      SDLC_WRITE_ALLOW: "*"
+      SDLC_WRITE_DENY: ".github/,.sdlc/,.claude/,intent/,specs/,designs/,plans/,releases/,runbooks/,CLAUDE.md,REVIEW.md,.sdlc-plugin/"
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ID: ${{ matrix.item.id }}
+      PLAN: ${{ matrix.item.plan }}
+      BRANCH: ${{ matrix.item.branch }}
+      SPEC: ${{ matrix.item.spec }}
+      STORY: ${{ matrix.item.story }}
+      TITLE: ${{ matrix.item.title }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch }}
+          persist-credentials: false
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+          persist-credentials: false
+
+      - name: Read the Ponytail pin
+        id: pins
+        run: |
+          ref=$(sed -n 's/^ponytail_ref:[[:space:]]*\([^[:space:]#]*\).*/\1/p' .sdlc/build.yaml | head -n1)
+          echo "ponytail_ref=${ref:-v4.10.0}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Ponytail (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: DietrichGebert/ponytail
+          ref: ${{ steps.pins.outputs.ponytail_ref }}
+          path: .sdlc-ponytail
+          persist-credentials: false
+
+      - name: Move Ponytail out of the project
+        run: mv .sdlc-ponytail "$RUNNER_TEMP/ponytail"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Set up the project's stack (.sdlc/build.yaml)
+        uses: ./.sdlc-plugin/.github/actions/setup-stack
+        with:
+          require-tests: "true"
+          install-if-code: "true"
+
+      - name: Switch to the story branch
+        run: |
+          set -euo pipefail
+          [[ "$BRANCH" =~ ^story/[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "::error::plan branch $BRANCH is not story/<name>"; exit 1; }
+          git checkout -b "$BRANCH"
+
+      - name: Preflight (Graphify, Ponytail)
+        run: |
+          # Exit 3 only means Ponytail is not active yet; it loads with the Claude session below.
+          python3 "$SCRIPTS/build_preflight.py" || [ $? -eq 3 ]
+
+      - name: Build the story with build-story (headless)
+        continue-on-error: true   # an incomplete build still opens a draft PR
+        run: |
+          set -euo pipefail
+          mkdir -p .sdlc-output
+          claude -p "/sdlc:build-story mode=build plan=$PLAN" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --plugin-dir "$RUNNER_TEMP/ponytail" \
+            --model "$MODEL" \
+            --max-turns 250 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Edit,MultiEdit,Bash,Task,Agent" \
+            --disallowedTools "Bash(git push*),Bash(gh *),Bash(curl *),Bash(wget *)" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/build-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/build-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Check what changed and build the PR body
+        id: check
+        env:
+          BASE: ${{ inputs.base_branch }}
+        run: |
+          set -euo pipefail
+          # The build may not change the SDLC's own files: put them back and say so.
+          protected=(.github .sdlc .claude intent specs designs plans releases runbooks CLAUDE.md REVIEW.md)
+          touched=$(git status --porcelain -- "${protected[@]}" | cut -c4- || true)
+          if [ -n "$touched" ]; then
+            echo "::warning::the build changed protected files; reverted: $touched"
+            # Only paths that exist: checkout fails as a whole on a missing pathspec.
+            git ls-files -z -m -d -- "${protected[@]}" | xargs -0 -r git checkout HEAD --
+            git clean -fdq -- "${protected[@]}"
+          fi
+          # Dependency and build output never goes in the PR, even if the story's .gitignore misses it.
+          printf '%s\n' node_modules/ .venv/ venv/ __pycache__/ .pytest_cache/ target/ bin/ obj/ dist/ build/ \
+            coverage/ test-results/ playwright-report/ graphify-out/ .sdlc-output/ >> .git/info/exclude
+          report="$RUNNER_TEMP/build-report.md"
+          if [ -f .sdlc-output/build-report.md ]; then mv .sdlc-output/build-report.md "$report"; fi
+          rm -rf .sdlc-output
+          result=INCOMPLETE
+          if [ -f "$report" ] && head -n1 "$report" | grep -qx 'RESULT: PASS'; then result=PASS; fi
+          changes=$(git status --porcelain | wc -l)
+          python3 "$VALIDATE_SPEC" --json "$SPEC" > "$RUNNER_TEMP/spec.json" 2>/dev/null || echo '{}' > "$RUNNER_TEMP/spec.json"
+          owner=$(jq -r '.owner // ""' "$RUNNER_TEMP/spec.json")
+          jira=$(sed -n 's/^jira:[[:space:]]*//p' "$PLAN" | head -n1)
+          prefix=$STORY; [ -n "$jira" ] && [ "$jira" != "none" ] && prefix=$jira
+          {
+            echo "**$STORY: $TITLE**, built automatically from the approved plan \`$PLAN\` (spec \`$SPEC\`)."
+            echo
+            if [ "$result" != "PASS" ]; then
+              echo "> [!WARNING]"
+              echo "> The build is **incomplete**, so this PR is a draft. Read the report below, finish it"
+              echo "> locally (\`/sdlc:build-story $STORY\` on this branch), then mark the PR ready for review."
+              echo
+            fi
+            if [ -n "$touched" ]; then
+              echo "> [!NOTE]"; echo "> Changes to SDLC files were reverted (builds may not change them): \`$(tr '\n' ' ' <<<"$touched")\`"; echo
+            fi
+            if [ -f "$report" ]; then cat "$report"; else echo "No build report was written (see the run's transcript)."; fi
+            echo
+            echo "Plan: \`$PLAN\`"
+            echo
+            echo "<details><summary>Evidence</summary>"
+            echo
+            echo "- Skill: sdlc:build-story mode=build, agent sdlc:verifier @ \`${{ inputs.sdlc_repo }}@${{ inputs.sdlc_ref }}\`"
+            echo "- Model: $MODEL"
+            echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (transcript artifact)"
+            echo "</details>"
+          } > "$RUNNER_TEMP/pr-body.md"
+          # peter-evans makes the branch from the base; carry the changes back to it.
+          git checkout -q "$BASE"
+          git branch -D "$BRANCH" >/dev/null
+          reviewer=${owner#@}; [[ "$reviewer" == */* ]] && reviewer=""   # teams are routed by CODEOWNERS, not here
+          {
+            echo "result=$result"; echo "changes=$changes"; echo "prefix=$prefix"; echo "reviewer=$reviewer"
+          } >> "$GITHUB_OUTPUT"
+          echo "Build $result, $changes changed paths"
+
+      - name: Upload transcript (evidence)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-transcript-${{ matrix.item.id }}
+          path: ${{ runner.temp }}/build-transcript.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Nothing was built
+        if: steps.check.outputs.changes == '0'
+        run: |
+          echo "::error::the build changed no files; see the transcript artifact"
+          exit 1
+
+      - name: Open the story PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+          branch: ${{ matrix.item.branch }}
+          base: ${{ inputs.base_branch }}
+          commit-message: |
+            ${{ steps.check.outputs.prefix }}: ${{ matrix.item.title }}
+
+            Built from ${{ matrix.item.plan }} @ ${{ github.sha }}
+          title: "${{ steps.check.outputs.prefix }}: ${{ matrix.item.title }}"
+          body-path: ${{ runner.temp }}/pr-body.md
+          draft: ${{ steps.check.outputs.result != 'PASS' }}
+          labels: story
+          reviewers: ${{ steps.check.outputs.reviewer }}

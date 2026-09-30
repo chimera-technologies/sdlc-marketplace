@@ -23,8 +23,9 @@ Arguments: `$ARGUMENTS` (`base` defaults to `origin/main`).
 1. The change: `git diff --stat <base>...HEAD`, then the diff of each file.
    If `graphify` is available, use `graphify query` / `explain` to find
    related code instead of reading whole files.
-2. The story: the branch is `story/<jira-key>-<name>`; the plan is the file
-   in `plans/` with `jira: <KEY>`. From the plan, read its spec
+2. The story: the branch is `story/<jira-key>-<name>` (or
+   `story/<spec-slug>-s<n>` without Jira); the plan is the file in `plans/`
+   whose `branch:` is this branch. From the plan, read its spec
    (`specs/<slug>.md`), the story's acceptance criteria and requirements.
 3. The design, if `designs/<slug>/design.md` exists: the screens whose
    Stories column names this story, and their PNGs (Read them; you can see

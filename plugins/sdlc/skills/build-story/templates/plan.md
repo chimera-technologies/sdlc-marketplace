@@ -2,8 +2,8 @@
 id: <spec-slug>-s<n>
 spec: specs/<spec-slug>.md
 story: S<n>
-jira: <JIRA-KEY, e.g. ABC-123>
-branch: story/<jira-key-lowercase>-<short-name>
+jira: <JIRA-KEY, e.g. ABC-123, or none without Jira>
+branch: <story/<jira-key-lowercase>-<short-name>, or story/<spec-slug>-s<n> without Jira>
 created: <YYYY-MM-DD>
 ---
 

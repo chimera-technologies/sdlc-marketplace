@@ -160,6 +160,22 @@ class InitTest(unittest.TestCase):
         self.assertIn("      ui_design: true\n", job)
         self.assertIn("automatic with the spec", self.read("CLAUDE.md"))
 
+    def test_auto_build(self):
+        self.run_init()
+        push = self.read(".github/workflows/sdlc-push.yml")
+        self.assertIn("uses: bala-chimera/sdlc-marketplace/.github/workflows/sdlc-build.yml@v0.6.0", push)
+        self.assertIn("inputs.rerun == 'build'", push)
+        self.assertIn("options: [intent-to-spec, spec-to-stories, build, release]", push)
+        self.assertTrue(json.loads(self.read(".sdlc/sdlc.json"))["auto_build"])
+        self.assertIn("a plan PR, then the build", self.read("CLAUDE.md"))
+
+    def test_auto_build_off(self):
+        self.run_init({**ANSWERS, "auto_build": False})
+        push = self.read(".github/workflows/sdlc-push.yml")
+        self.assertNotIn("sdlc-build.yml", push)
+        self.assertNotIn(", build,", push)
+        self.assertIn("`/sdlc:build-story <KEY>` | `plans/", self.read("CLAUDE.md"))
+
     def test_jira_off(self):
         self.run_init({**ANSWERS, "jira": {"enabled": False}})
         self.assertIn("enabled: false", self.read(".sdlc/jira.yaml"))

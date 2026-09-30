@@ -35,7 +35,8 @@ DEFAULT_REPO = "bala-chimera/sdlc-marketplace"
 GRAPHIFY_VERSION = "0.9.71"
 PONYTAIL_REF = "v4.10.0"
 STAGES = ["plan", "design", "ui_design", "build", "pr_review", "test", "deploy", "maintain"]
-DEFAULT_MODELS = {"intake": "claude-sonnet-5", "spec": "claude-opus-5-5", "review": "claude-sonnet-5"}
+DEFAULT_MODELS = {"intake": "claude-sonnet-5", "spec": "claude-opus-5-5", "review": "claude-sonnet-5",
+                  "build": "claude-opus-5-5"}
 BEGIN, END = "<!-- sdlc:begin -->", "<!-- sdlc:end -->"
 FOLDERS = ["intent", "specs", "designs", "plans", "releases", "runbooks"]
 GITIGNORE = [".sdlc-input/", ".sdlc-output/", ".sdlc-plugin/", "graphify-out/",
@@ -77,6 +78,8 @@ def normalize(answers):
     stages.update(a.get("stages") or {})
     a["stages"] = {s: bool(stages[s]) for s in STAGES}
     a["models"] = {**DEFAULT_MODELS, **(a.get("models") or {})}
+    # Automatic Build: plan PR, then build, for each story in turn (sdlc-build.yml).
+    a["auto_build"] = bool(a.get("auto_build", True))
 
     owners = a.setdefault("owners", {})
     for role in ("product_owner", "service_owner", "tech_lead"):
@@ -273,7 +276,11 @@ def render_claude_block(a):
         rows.append("| Design | automatic when an intent merges (`sdlc:write-spec`, `sdlc:review-spec`) | `specs/<slug>.md` | owner (+ tech lead if risk is high) merges |")
     if s["ui_design"]:
         rows.append("| UI design | automatic with the spec (HTML mockups); `/sdlc:design-ui` to redo them or refine them in Figma | `designs/<slug>/` | owner merges the spec PR (or a design PR) |")
-    if s["build"]:
+    if s["build"] and a["auto_build"]:
+        rows.append("| Build | automatic, one story at a time: a plan PR, then the build when it merges "
+                    "(`/sdlc:build-story <KEY>` to build by hand) | `plans/<slug>-s<n>.md`, then code and tests "
+                    "in the story PR | owner merges the plan PR; verifier PASS |")
+    elif s["build"]:
         rows.append("| Build | `/sdlc:build-story <KEY>` | `plans/<slug>-s<n>.md`, code, tests | plan approved in plan mode, verifier PASS |")
     if s["pr_review"]:
         rows.append("| PR review | story PR opened or pushed | review comment, `review:*` label | `review-gate` passes |")
@@ -294,8 +301,8 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
 {chr(10).join(rows)}
 
 - One artifact per PR on its own branch (`intent/`, `spec/`, `design/`,
-  `story/`, `release/`; a spec PR also carries its UI mockups); never
-  commit them straight to `{a['base_branch']}`.
+  `plan/`, `story/`, `release/`; a spec PR also carries its UI mockups);
+  never commit them straight to `{a['base_branch']}`.
 - Status lives in git: open PR = proposed, merged = accepted, closed = rejected.
 - Owners come from `.sdlc/owners.yaml`; the stack and test commands from
   `.sdlc/build.yaml`; review rules from `REVIEW.md`.
@@ -366,6 +373,12 @@ def render_callers(a):
             a, "sdlc-spec-to-stories.yml",
             extra_with="      spec_file: ${{ inputs.rerun == 'spec-to-stories' && inputs.file || '' }}\n",
             if_expr="github.event_name == 'push' || inputs.rerun == 'spec-to-stories'"))
+    auto_build = s["build"] and a["auto_build"]
+    if auto_build:
+        jobs.append("  build:\n" + call(
+            a, "sdlc-build.yml",
+            extra_with=f"      model: {m['build']}\n      spec_file: ${{{{ inputs.rerun == 'build' && inputs.file || '' }}}}\n",
+            if_expr="github.event_name == 'push' || inputs.rerun == 'build'"))
     if s["test"]:
         jobs.append("  tests:\n" + call(a, "sdlc-main-tests.yml", if_expr="github.event_name == 'push'"))
     if s["deploy"]:
@@ -375,7 +388,8 @@ def render_callers(a):
             if_expr="github.event_name == 'push' || inputs.rerun == 'release'",
             extra_secrets=("DEPLOY_TOKEN",)))
     if jobs:
-        options = [o for o, on in (("intent-to-spec", s["design"]), ("spec-to-stories", s["design"]), ("release", s["deploy"])) if on]
+        options = [o for o, on in (("intent-to-spec", s["design"]), ("spec-to-stories", s["design"]),
+                                   ("build", auto_build), ("release", s["deploy"])) if on]
         files[".github/workflows/sdlc-push.yml"] = (
             header(a, "SDLC push", f"After a merge to {a['base_branch']}: the next stage for each merged artifact, and the tests.")
             + f"on:\n  push:\n    branches: [{a['base_branch']}]\n"
@@ -454,7 +468,8 @@ def merge_gitignore(text):
 def plan_files(root, a, force=False):
     """{relpath: (new_content, kind)} with kind in managed | once | merged."""
     root = Path(root)
-    out = {".sdlc/sdlc.json": (json.dumps({k: a[k] for k in ("sdlc_repo", "sdlc_ref", "base_branch", "maintain_cron", "stages", "models")},
+    out = {".sdlc/sdlc.json": (json.dumps({k: a[k] for k in ("sdlc_repo", "sdlc_ref", "base_branch", "maintain_cron", "stages",
+                                                             "auto_build", "models")},
                                           indent=2) + "\n", "managed")}
     once = {
         ".sdlc/owners.yaml": render_owners(a), ".sdlc/jira.yaml": render_jira(a), ".sdlc/build.yaml": render_build(a),

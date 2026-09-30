@@ -134,10 +134,14 @@ def validate(path, root=".", check_tests=False):
     story, jira = fm.get("story", ""), fm.get("jira", "")
     if story and not STORY_ID_RE.match(story):
         errors.append(f"frontmatter: story must look like S1, got {story!r}")
-    if jira and not vi.JIRA_RE.match(jira):
-        errors.append(f"frontmatter: jira must be a Jira key (ABC-123), got {jira!r}")
+    if jira and jira != "none" and not vi.JIRA_RE.match(jira):
+        errors.append(f"frontmatter: jira must be a Jira key (ABC-123) or none, got {jira!r}")
     branch = fm.get("branch", "")
-    if branch and jira and not re.match(rf"^story/{re.escape(jira.lower())}(-[a-z0-9]+)+$", branch):
+    if branch and jira == "none" and fm.get("id"):
+        # No Jira: the branch is named after the plan (story/<spec-slug>-s<n>).
+        if not re.match(rf"^story/{re.escape(fm['id'])}(-[a-z0-9]+)*$", branch):
+            errors.append(f"frontmatter: branch must be story/{fm['id']} (jira: none), got {branch!r}")
+    elif branch and jira and not re.match(rf"^story/{re.escape(jira.lower())}(-[a-z0-9]+)+$", branch):
         errors.append(f"frontmatter: branch must be story/{jira.lower()}-<short-name>, got {branch!r}")
     if fm.get("created"):
         try:
