@@ -64,7 +64,7 @@ error and validation states the spec requires. Ask the person to confirm.
   never lorem ipsum. Size for the target in `CLAUDE.md` (desktop: 1280 wide).
   Design only what the stories ask for; nothing from Out of scope.
 - `from=live`: capture each screen of the running app with
-  `generate_figma_design` (drive it to each state with Playwright), then
+  `generate_figma_design` (drive a web app to each state with Playwright), then
   rename each frame to its screen id.
 - Check each frame once with `get_screenshot` and fix what looks wrong.
   Use `get_metadata` (small) rather than `get_design_context` (large) to

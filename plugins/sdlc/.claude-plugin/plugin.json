@@ -3,6 +3,6 @@
   "displayName": "AI-native SDLC",
   "version": "0.5.0",
   "description": "Skills and hooks for the AI-native SDLC loop: Plan (write-intent), Design (write-spec, review-spec, design-ui with Figma), Build (build-story with Graphify and Ponytail, verifier subagent), PR review (review-story gate), the security-policy skill, and guardrail hooks (headless write guard, build guard, intent and spec validation). Test, Deploy and Maintain to follow.",
-  "author": { "name": "bala-chimera (POC)" },
+  "author": { "name": "sdlc-marketplace maintainers" },
   "keywords": ["sdlc", "intent", "plan", "spec", "security", "policy"]
 }

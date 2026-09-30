@@ -2,7 +2,7 @@
 id: <spec-slug>-s<n>
 spec: specs/<spec-slug>.md
 story: S<n>
-jira: <JIRA-KEY, e.g. SCRUM-8>
+jira: <JIRA-KEY, e.g. ABC-123>
 branch: story/<jira-key-lowercase>-<short-name>
 created: <YYYY-MM-DD>
 ---
@@ -27,7 +27,7 @@ tokens to use. Delete this section otherwise.>
 ## Tests
 | AC | Acceptance criterion | Test |
 |---|---|---|
-| AC-1 | <first acceptance criterion, copied from the spec> | <tests/e2e/<file>.spec.js> › "S<n> AC-1: <name>" |
+| AC-1 | <first acceptance criterion, copied from the spec> | <test file under test_paths> › "S<n> AC-1: <name>" |
 
 ## Steps
 1. <Write the failing tests for AC-1..n.>

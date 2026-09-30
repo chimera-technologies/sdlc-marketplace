@@ -9,8 +9,12 @@ Usage (from the product repo root):
   validate_plan.py --check-tests plans/foo-s1.md   # also: every AC has a test
 
 The plan must map every acceptance criterion of its story (in the spec) to a
-test named "S<n> AC-<k>". --check-tests then looks for those names in the
-files under tests/.
+test named after "S<n> AC-<k>". --check-tests then looks for those names in
+the repo's test paths (`test_paths` in .sdlc/build.yaml, default tests/).
+
+Test names are matched in any language's style, case-insensitive:
+"S1 AC-2: ..." (Playwright, Jest, JUnit @DisplayName), test_s1_ac_2_...
+(pytest, Go), S1Ac2... (C#, Java method names).
 
 Exit code 0 = valid (warnings allowed), 1 = at least one error.
 """
@@ -27,13 +31,38 @@ vs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(vs)
 vi = vs.vi
 
+_BG_PATH = Path(__file__).resolve().parents[3] / "hooks" / "build_guard.py"
+_bspec = importlib.util.spec_from_file_location("build_guard", _BG_PATH)
+bg = importlib.util.module_from_spec(_bspec)
+_bspec.loader.exec_module(bg)
+
 REQUIRED_KEYS = ["id", "spec", "story", "jira", "branch", "created"]
 SECTIONS = ["Story", "Files", "Tests", "Steps", "Risks and rollback", "Out of scope"]
 MUST_BE_REAL = ["Story", "Files", "Tests", "Steps"]
 STORY_ID_RE = re.compile(r"^S\d+$")
 AC_ROW_RE = re.compile(r"^\|\s*AC-(\d+)\s*\|([^|]*)\|([^|]*)\|\s*$", re.MULTILINE)
 FILE_ROW_RE = re.compile(r"^\|\s*([^|]+?)\s*\|([^|]*)\|\s*$", re.MULTILINE)
-TEST_SUFFIXES = {".js", ".mjs", ".cjs", ".ts", ".mts", ".jsx", ".tsx", ".py"}
+TEST_SUFFIXES = {
+    ".js", ".mjs", ".cjs", ".ts", ".mts", ".jsx", ".tsx", ".py", ".java", ".kt", ".kts", ".scala",
+    ".groovy", ".cs", ".fs", ".vb", ".go", ".rb", ".php", ".rs", ".swift", ".dart", ".ex", ".exs",
+    ".feature", ".robot", ".spec", ".sh",
+}
+DEFAULT_TEST_PATHS = ["tests/"]
+
+
+def test_paths(root):
+    """Where tests live, from .sdlc/build.yaml (`test_paths`), default tests/."""
+    cfg = bg.load_build_config(root) or {}
+    paths = cfg.get("test_paths") or DEFAULT_TEST_PATHS
+    if isinstance(paths, str):
+        paths = [paths]
+    return [p.strip("/") + "/" for p in paths if p.strip("/")]
+
+
+def name_pattern(story_id, k):
+    """Regex for the test of AC-k in any naming style: 'S1 AC-2', 's1_ac_2', 'S1Ac2', 'S1-AC-2'."""
+    n = story_id[1:]
+    return re.compile(rf"(?i)(?<![a-z0-9])s{n}[ _-]?ac[ _-]?{k}(?!\d)")
 
 
 def story_criteria(spec_text, story_id):
@@ -63,16 +92,31 @@ def story_screens(root, spec_slug, story_id):
     return screens
 
 
+def design_created(root, spec_slug):
+    """The design manifest's `created` date (YYYY-MM-DD string), or None."""
+    manifest = Path(root) / "designs" / spec_slug / "design.md"
+    if not manifest.is_file():
+        return None
+    fm, _ = vi.parse_frontmatter(manifest.read_text(encoding="utf-8"))
+    return (fm or {}).get("created")
+
+
 def test_names_found(root, names):
-    """Which of the given test names appear in files under tests/."""
+    """Which of the given test names ("S<n> AC-<k>") appear in the repo's test files."""
     texts = []
-    tests = Path(root) / "tests"
-    if tests.is_dir():
-        for p in tests.rglob("*"):
-            if p.is_file() and p.suffix in TEST_SUFFIXES:
-                texts.append(p.read_text(encoding="utf-8", errors="replace"))
+    for rel in test_paths(root):
+        base = Path(root) / rel
+        if base.is_dir():
+            for p in base.rglob("*"):
+                if p.is_file() and p.suffix in TEST_SUFFIXES and "node_modules" not in p.parts:
+                    texts.append(p.read_text(encoding="utf-8", errors="replace"))
     blob = "\n".join(texts)
-    return {n for n in names if re.search(re.escape(n) + r"(?!\d)", blob)}
+    found = set()
+    for n in names:
+        story, ac = n.split(" AC-")
+        if name_pattern(story, ac).search(blob):
+            found.add(n)
+    return found
 
 
 def validate(path, root=".", check_tests=False):
@@ -134,12 +178,17 @@ def validate(path, root=".", check_tests=False):
     screens = story_screens(root, spec_slug, story) if spec_slug and story else []
     if screens:
         design = sections.get("Design", "")
+        # A plan written before the design existed cannot reference it: warn, don't fail.
+        design_date = design_created(root, spec_slug)
+        predates = bool(design_date and fm.get("created") and fm["created"] < design_date)
+        report = warnings if predates else errors
+        note = f" (plan {fm.get('created')} predates the design {design_date}; reference it next time this story changes)" if predates else ""
         if not design:
-            errors.append(f"story {story} has design screens {screens} in designs/{spec_slug}/design.md; "
-                          "add a '## Design' section after '## Story' naming each one")
+            report.append(f"story {story} has design screens {screens} in designs/{spec_slug}/design.md; "
+                          f"add a '## Design' section after '## Story' naming each one{note}")
         for sid in screens:
             if design and not re.search(rf"(?<![a-z0-9-]){re.escape(sid)}(?![a-z0-9-])", design):
-                errors.append(f"Design section must reference screen {sid!r} (designs/{spec_slug}/screens/{sid}.png)")
+                report.append(f"Design section must reference screen {sid!r} (designs/{spec_slug}/screens/{sid}.png){note}")
     for ph in vi.placeholders(text):
         errors.append(f"unfilled template placeholder: {ph[:60]}")
     for name in MUST_BE_REAL:
@@ -164,12 +213,15 @@ def validate(path, root=".", check_tests=False):
                 f"Tests must have one row per acceptance criterion of {story} (AC-1..AC-{len(criteria)})"
                 + (f"; missing {['AC-%d' % k for k in missing]}" if missing else "")
                 + (f"; not in the spec {['AC-%d' % k for k in extra]}" if extra else ""))
+        paths = test_paths(root)
         for k, (_, test) in sorted(rows.items()):
             name = f"{story} AC-{k}"
-            if "tests/" not in test:
-                errors.append(f"AC-{k}: the Test column must name a file under tests/")
-            if not re.search(re.escape(name) + r"(?!\d)", test):
-                errors.append(f"AC-{k}: the Test column must name a test titled \"{name}: ...\"")
+            if not any(p in test for p in paths):
+                errors.append(f"AC-{k}: the Test column must name a file under {' or '.join(paths)} "
+                              "(test_paths in .sdlc/build.yaml)")
+            if not name_pattern(story, k).search(test):
+                errors.append(f"AC-{k}: the Test column must name a test for \"{name}\" "
+                              f"(e.g. \"{name}: ...\" or test_{story.lower()}_ac_{k}_...)")
         if check_tests:
             names = [f"{story} AC-{k}" for k in sorted(want)]
             found = test_names_found(root, names)

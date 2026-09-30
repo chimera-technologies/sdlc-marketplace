@@ -183,6 +183,15 @@ class PlanDesignRuleTest(DesignRepo):
             "## Files", "## Design\n- claim-status-list: designs/claims-status-self-service/screens/claim-status-list.png\n\n## Files")
         self.assertEqual(self.plan_for("S1", with_design), [])
 
+    def test_plan_older_than_design_only_warns(self):
+        self.manifest.write_text(self.text.replace("| S3 | REQ-1, REQ-2 |", "| S1, S3 | REQ-1, REQ-2 |"), encoding="utf-8")
+        old_plan = self.s1_plan().replace("created: 2026-09-29", "created: 2026-09-01")
+        p = self.root / "plans" / "claims-status-self-service-s1.md"
+        p.write_text(old_plan, encoding="utf-8")
+        _, errors, warnings = vp.validate(p, self.root)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("predates the design 2026-09-29" in w for w in warnings), warnings)
+
     def test_design_section_must_name_each_screen(self):
         self.manifest.write_text(self.text.replace("| S3 | REQ-1, REQ-2 |", "| S1, S3 | REQ-1, REQ-2 |"), encoding="utf-8")
         wrong = self.s1_plan().replace("## Files", "## Design\n- claim-status-empty: the empty state\n\n## Files")

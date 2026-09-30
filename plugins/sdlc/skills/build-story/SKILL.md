@@ -1,12 +1,12 @@
 ---
 name: build-story
 description: Build one story from an accepted spec (the Build stage of the
-  SDLC loop). Use when someone says "build SCRUM-8", "implement S1", "start
+  SDLC loop). Use when someone says "build ABC-123", "implement S1", "start
   the next story", or runs /sdlc:build-story. It sets up Graphify and
   Ponytail first, plans in plan mode, writes the acceptance tests first,
   implements until they pass, has the verifier subagent check the result,
   and opens the story PR.
-argument-hint: "<JIRA-KEY or S<n>>, e.g. SCRUM-8"
+argument-hint: "<JIRA-KEY or S<n>>, e.g. ABC-123"
 ---
 
 # Build a story
@@ -38,13 +38,19 @@ rules), as pinned in `.sdlc/build.yaml`.
   this session.
 - Exit 1: stop and show the error. Do not work around it.
 
+**Stack**: `.sdlc/build.yaml` must declare `test_command` (and usually
+`toolchains`, `install_command` and `test_file_command`). The stack is the
+tech lead's decision in the spec's Technology and architecture section. If
+`test_command` is missing, stop and tell the person to run
+`/sdlc:init stack=specs/<slug>.md`, which records it.
+
 The plugin's build guard hook blocks any write to the repo's code paths
 until the preflight has succeeded, you are on the story branch, and the
 plan exists. Do not try to bypass it.
 
 ## Step 1: find the story
 
-- A Jira key (`SCRUM-8`): read it with the Atlassian MCP (`getJiraIssue`,
+- A Jira key (e.g. `ABC-123`): read it with the Atlassian MCP (`getJiraIssue`,
   fields summary, status, labels). Its `spec-<slug>-s<n>` label names the
   spec (`specs/<slug>.md`) and story (`S<n>`). Without the MCP, use the story
   map in `CLAUDE.md`.
@@ -72,7 +78,10 @@ Present a plan following `${CLAUDE_SKILL_DIR}/templates/plan.md`:
 - **Files**: every file you will add or change, and why.
 - **Tests**: one row per acceptance criterion of the story, in order,
   `AC-1..AC-n`, copying the criterion's words from the spec, each mapped to
-  a test file under `tests/` and a test titled `S<n> AC-<k>: <name>`.
+  a test file under the repo's `test_paths` (`.sdlc/build.yaml`, default
+  `tests/`) and a test named for `S<n> AC-<k>` in the language's style:
+  `"S1 AC-2: rejects empty names"`, `test_s1_ac_2_rejects_empty_names`,
+  `S1Ac2RejectsEmptyNames`.
 - **Steps**, **Risks and rollback**, **Out of scope**.
 
 Wait for the person to approve the plan. Change it if they ask.
@@ -93,9 +102,11 @@ Wait for the person to approve the plan. Change it if they ask.
 ## Step 4: tests first
 
 Write the tests from the plan's Tests table, one or more per criterion,
-each titled exactly `S<n> AC-<k>: <name>`. Run only that file with a short
-reporter (Playwright: `npx playwright test <file> --reporter=line`) and
-confirm they fail for the right reason (missing behaviour, not a typo).
+each named for `S<n> AC-<k>` as above. Run only those tests with
+`test_file_command` from `.sdlc/build.yaml` (`{file}` is the test file, for
+example `npx playwright test {file} --reporter=line`, `pytest -q {file}`,
+`mvn -q test -Dtest={file}`, `dotnet test --filter {file}`) and confirm they
+fail for the right reason (missing behaviour, not a typo).
 
 ## Step 5: implement until green
 
@@ -103,12 +114,13 @@ Implement in small steps, re-running only the story's test file after each.
 Follow `CLAUDE.md`'s stack and rules. After 5 failed rounds on the same
 test, stop and tell the person what is blocking.
 
-If the story has screens: take one Playwright screenshot of each state the
-screens show (into `test-results/`, which is not committed), Read it next to
-the design PNG, and fix visible differences in layout, copy and colours.
+If the story has screens: capture each state the screens show (a web UI:
+a Playwright or browser screenshot; other UIs: the platform's screenshot
+tool) into a folder git ignores, Read it next to the design PNG, and fix
+visible differences in layout, copy and colours.
 
 Then run, once each:
-- the full test suite (short reporter);
+- the full suite once with `test_command`;
 - `python "${CLAUDE_SKILL_DIR}/scripts/validate_plan.py" --check-tests plans/<id>.md`;
 - `graphify update .` (keeps the graph current; local, no tokens).
 
@@ -144,8 +156,9 @@ smaller model with fresh context and reports PASS or FAIL per criterion.
   Grep. Read only the files in the plan, and only the parts you need.
 - Run the story's test file, not the whole suite, while iterating; use the
   short reporter; read only the first error of a failing test.
-- Never read `node_modules/`, `test-results/`, `playwright-report/`,
-  `graphify-out/cache/` or lock files.
+- Never read dependency, build or report folders (`node_modules/`,
+  `.venv/`, `target/`, `bin/`, `obj/`, `dist/`, `test-results/`,
+  `playwright-report/`, `graphify-out/cache/`) or lock files.
 - Keep Ponytail on (`full`). Its rules **never** override the spec: every
   acceptance criterion, input validation, error message, security rule and
   test the spec requires stays in, however short the code.

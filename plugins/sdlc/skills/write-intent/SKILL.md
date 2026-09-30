@@ -184,7 +184,7 @@ merged means accepted, and closed means rejected.
        Automation flow, which would draft a duplicate intent)
    - Create it with `createJiraIssue`. Set `record_id` to the new key, keep
      `source: human`, and add the key to Evidence (e.g.
-     "Jira SCRUM-12 (Epic created from <document>)").
+     "Jira ABC-12 (Epic created from <document>)").
    - Re-run the validator.
    If the person declines, or the MCP is not connected, leave `record_id:
    none` and say that the intent will have no Jira link.

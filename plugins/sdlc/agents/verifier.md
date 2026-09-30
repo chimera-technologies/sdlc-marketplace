@@ -27,10 +27,9 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
 
 1. **Plan traceability**: run
    `python "<validate_plan.py path from the caller>" --check-tests <plan>`.
-   Every acceptance criterion must have a test named `S<n> AC-<k>`.
-2. **Tests pass**: run the repo's test command for this story's test file
-   with a short reporter (for Playwright:
-   `npx playwright test <file> --reporter=line`), then the full suite once.
+   Every acceptance criterion must have a test named for `S<n> AC-<k>`.
+2. **Tests pass**: run `test_file_command` from `.sdlc/build.yaml` for this
+   story's test files, then `test_command` once for the full suite.
    Report only failing test names and their first error line.
 3. **Each criterion is really tested**: for every AC, read its test and
    confirm it checks the behaviour the criterion describes, not something
@@ -45,7 +44,7 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
    acceptance criterion asks for.
 7. **Design**: if the plan has a Design section, Read each named screen's
    PNG in `designs/<slug>/screens/` and compare it with the built UI (the
-   code, and a Playwright screenshot if one is in `test-results/`). Report
+   code, and a screenshot of the built UI if the build left one). Report
    missing elements, wrong order, wrong copy or wrong states as findings;
    ignore pixel-level differences.
 8. **Minimalism did not cut corners**: nothing required by the spec
@@ -60,7 +59,7 @@ Reply with exactly this shape:
 VERDICT: PASS | FAIL
 | AC | Test | Result | Note |
 |---|---|---|---|
-| AC-1 | tests/e2e/...spec.js › S1 AC-1: ... | pass | |
+| AC-1 | <test file> › S1 AC-1: ... | pass | |
 Findings:
 - [high|medium|low] <file:line> <what is wrong> -> <what to change>
 Tests: <n passed, m failed> (full suite)

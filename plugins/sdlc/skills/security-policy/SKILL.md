@@ -16,8 +16,9 @@ description: Security and data-handling policy for every product repo. Use
      CODEOWNERS. Anything that must ALWAYS hold should also get a hook or CI
      check; this skill is advisory. -->
 
-- **Policy owner:** `@bala-chimera` (named approver for changes and
-  for every exception)
+- **Policy owner:** the `security_owner` in the project's
+  `.sdlc/owners.yaml` (falls back to `default.tech_lead`): the named
+  approver for changes and for every exception
 - **Version:** 0.1 (draft), last reviewed: not yet
 
 ## How to apply it

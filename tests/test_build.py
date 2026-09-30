@@ -82,8 +82,29 @@ class ValidatePlanTest(Repo):
         self.assertError(errors, "not in the spec ['AC-4']")
 
     def test_test_name_must_match(self):
-        _, errors, _ = vp.validate(self.plan(self.plan_text.replace('"S1 AC-2:', '"S1 AC2:')), self.root)
-        self.assertError(errors, 'AC-2: the Test column must name a test titled "S1 AC-2')
+        _, errors, _ = vp.validate(self.plan(self.plan_text.replace('"S1 AC-2:', '"S2 AC-2:')), self.root)
+        self.assertError(errors, 'AC-2: the Test column must name a test for "S1 AC-2"')
+
+    def test_test_names_in_any_language_style(self):
+        for style in ('"S1 AC-2: x"', 'test_s1_ac_2_rejects', 'S1Ac2Rejects', 'S1-AC-2'):
+            text = self.plan_text.replace('"S1 AC-2: status codes, never internal states"', style)
+            _, errors, _ = vp.validate(self.plan(text), self.root)
+            self.assertEqual(errors, [], style)
+
+    def test_test_paths_from_build_yaml(self):
+        (self.root / ".sdlc").mkdir(exist_ok=True)
+        (self.root / ".sdlc" / "build.yaml").write_text("test_paths: [src/test/, spec/]\n", encoding="utf-8")
+        _, errors, _ = vp.validate(self.plan(), self.root)
+        self.assertEqual(sum("must name a file under src/test/ or spec/" in e for e in errors), 3)
+        text = self.plan_text.replace("tests/api/test_customer_status.py", "src/test/CustomerStatusTest.java")
+        _, errors, _ = vp.validate(self.plan(text), self.root)
+        self.assertEqual(errors, [])
+        (self.root / "src" / "test").mkdir(parents=True)
+        (self.root / "src" / "test" / "CustomerStatusTest.java").write_text(
+            '@DisplayName("S1 AC-1 own claims") void a(){}\nvoid s1Ac2StatusCodes(){}\nvoid test_S1_AC_3(){}',
+            encoding="utf-8")
+        _, errors, _ = vp.validate(self.plan(text), self.root, check_tests=True)
+        self.assertEqual(errors, [])
 
     def test_test_must_be_under_tests(self):
         _, errors, _ = vp.validate(self.plan(self.plan_text.replace(
