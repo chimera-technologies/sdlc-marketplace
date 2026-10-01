@@ -4,6 +4,13 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.8.2 (2026-10-01)
+
+- PR review: the advisory reviewers (`anthropics/claude-code-action`) now
+  run on story PRs opened by automatic Build. The action refuses PRs from
+  bots unless allowed; `sdlc-pr.yml` allows exactly the sdlc-bot App
+  (`allowed_bots` = the App's slug), no other bot.
+
 ## v0.8.1 (2026-09-30)
 
 - The Build preflight no longer fails on a first story: when none of
