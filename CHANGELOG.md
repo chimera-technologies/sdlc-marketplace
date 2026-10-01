@@ -4,6 +4,29 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.9.0 (2026-10-01)
+
+Every accepted spec gets a Jira Epic and its stories, with or without a
+Jira ticket behind the intent.
+
+- `sdlc-spec-to-stories.yml` / `spec_stories.py --jira-config .sdlc/jira.yaml`:
+  a merged spec whose `record_id` is `none` (an intent from a document, a
+  conversation without the Atlassian MCP, or a Maintain breach) now gets
+  its Epic created in `space_key` (type `epic_issue_type`, labels
+  `from-spec`, `spec-<slug>`, `created_label`), then one Story per `S<n>`
+  under it (type `story_issue_type`). Re-runs find the Epic by its label.
+  Before, such specs were skipped and had no Jira records at all.
+- Intents with a Jira record are unchanged (stories under that Epic, or
+  linked to a non-Epic ticket).
+- Projects with Jira off: no change.
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.9.0`. Nothing to configure: it uses the
+  `space_key` already in `.sdlc/jira.yaml`. To backfill a spec merged
+  earlier without a record: Actions > SDLC push > Run workflow, `rerun`
+  `spec-to-stories`, `file` `specs/<slug>.md`.
+
 ## v0.8.2 (2026-10-01)
 
 - PR review: the advisory reviewers (`anthropics/claude-code-action`) now

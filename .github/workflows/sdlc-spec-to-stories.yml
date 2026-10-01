@@ -6,7 +6,9 @@ name: "SDLC Design: spec to stories"
 #
 # Design -> Build boundary. Fires once an owner merges a spec into main and
 # creates one Jira story per "### S<n>:" entry in its Work breakdown, under
-# the intent's Epic (or linked to its record if that is not an Epic).
+# the intent's Epic (or linked to its record if that is not an Epic). An
+# intent with no Jira record gets its Epic created here (space_key from
+# .sdlc/jira.yaml, labelled spec-<slug>), so every accepted spec has one.
 # Deterministic: no model involved. Idempotent: re-runs and spec revisions
 # only add stories that don't exist yet.
 
@@ -109,16 +111,18 @@ jobs:
           for f in "${files[@]}"; do
             [ -f "$f" ] || { echo "::error::$f is not on main"; exit 1; }
             python3 "$VALIDATE_SPEC" --owners .sdlc/owners.yaml "$f"   # never create stories from an invalid spec
-            rid=$(python3 "$VALIDATE_SPEC" --json "$f" | jq -r '.record_id // "none"')
+            # No record_id: the Epic is created here from .sdlc/jira.yaml (space_key), found by label on re-runs.
+            python3 "$SPEC_STORIES" "$f" --create --jira-config .sdlc/jira.yaml > "$RUNNER_TEMP/result.json"
+            cat "$RUNNER_TEMP/result.json"
+            rid=$(jq -r '.record // "none"' "$RUNNER_TEMP/result.json")
             if [ "$rid" = "none" ]; then
-              echo "::notice::$f has no record_id (no Jira record); no stories created."
+              echo "::notice::$f has no record_id and .sdlc/jira.yaml is not enabled with a space_key; no stories created."
               echo "- \`$f\`: no Jira record, skipped" >> "$GITHUB_STEP_SUMMARY"; continue
             fi
-            python3 "$SPEC_STORIES" "$f" --create > "$RUNNER_TEMP/result.json"
-            cat "$RUNNER_TEMP/result.json"
             created=$(jq -r '.created | length' "$RUNNER_TEMP/result.json")
             existing=$(jq -r '.existing | length' "$RUNNER_TEMP/result.json")
-            echo "- \`$f\` -> $rid: $created created, $existing already existed" >> "$GITHUB_STEP_SUMMARY"
+            epic=$(jq -r 'if .epic_created then " (Epic created)" else "" end' "$RUNNER_TEMP/result.json")
+            echo "- \`$f\` -> $rid$epic: $created created, $existing already existed" >> "$GITHUB_STEP_SUMMARY"
             if [ "$created" -gt 0 ]; then
               list=$(jq -r '.created[] | "- \(.key) \(.summary)"' "$RUNNER_TEMP/result.json")
               msg=$(printf 'Stories created from %s:\n%s\n\nSpec: %s' "$f" "$list" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$AFTER/$f")

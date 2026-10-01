@@ -159,6 +159,8 @@ def render_jira(a):
                 "# fill in site and space_key to turn it on.\n"
                 "enabled: false\n")
     return (f"# Where the sdlc skills and workflows create and link Jira records.\n"
+            "# Every accepted spec gets an Epic (the intent's Jira ticket, or one\n"
+            "# created in space_key when the spec merges) and one Story per S<n>.\n"
             f"enabled: true\n"
             f"site: {j['site']}\n"
             f"space_key: {j['space_key']}\n"
