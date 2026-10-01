@@ -27,6 +27,7 @@ vp = load("validate_plan", PLUGIN / "skills" / "build-story" / "scripts" / "vali
 bg = load("build_guard", PLUGIN / "hooks" / "build_guard.py")
 bp = load("build_preflight", PLUGIN / "skills" / "build-story" / "scripts" / "build_preflight.py")
 ns = load("next_story", PLUGIN / "skills" / "build-story" / "scripts" / "next_story.py")
+js = load("jira_story", PLUGIN / "skills" / "build-story" / "scripts" / "jira_story.py")
 
 TEST_FILE = '''
 test("S1 AC-1: only the customer's own claims", () => {});
@@ -226,6 +227,65 @@ class NextStoryTest(Repo):
         self.assertEqual(json.loads(r.stdout)["actions"][0]["action"], "plan")
         r = subprocess.run([sys.executable, str(PLUGIN / "skills" / "build-story" / "scripts" / "next_story.py"),
                             "--root", str(self.root), "--prs", str(prs), "--spec", "../etc/x.md"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+
+
+class FakeJiraWorkflow:
+    """A story in a Jira workflow: status plus the transitions out of it."""
+
+    WORKFLOW = {  # status: (category, [(transition name, to status, to category)])
+        "To Do": ("new", [("Start", "In Progress", "indeterminate"), ("Close", "Done", "done")]),
+        "In Progress": ("indeterminate", [("Ready", "In Review", "indeterminate"), ("Close", "Done", "done")]),
+        "In Review": ("indeterminate", [("Close", "Done", "done")]),
+        "Done": ("done", [("Reopen", "To Do", "new")]),
+    }
+
+    def __init__(self, status="To Do", workflow=None):
+        self.status, self.posts = status, []
+        self.workflow = workflow or self.WORKFLOW
+
+    def call(self, method, path, body=None):
+        if method == "GET" and path.endswith("?fields=status"):
+            cat = self.workflow[self.status][0]
+            return {"fields": {"status": {"name": self.status, "statusCategory": {"key": cat}}}}
+        if method == "GET" and path.endswith("/transitions"):
+            return {"transitions": [{"id": str(i), "name": n, "to": {"name": to, "statusCategory": {"key": c}}}
+                                    for i, (n, to, c) in enumerate(self.workflow[self.status][1])]}
+        self.posts.append((path, body))
+        if path.endswith("/transitions"):
+            self.status = self.workflow[self.status][1][int(body["transition"]["id"])][1]
+        return {}
+
+
+class JiraStoryTest(unittest.TestCase):
+    def test_build_start_then_review(self):
+        jira = FakeJiraWorkflow()
+        self.assertEqual(js.move(jira, "SCR-1", "in-progress"), "SCR-1: To Do -> In Progress")
+        self.assertEqual(js.move(jira, "SCR-1", "in-review"), "SCR-1: In Progress -> In Review")
+
+    def test_never_moves_backwards_or_twice(self):
+        for status, target in (("Done", "in-progress"), ("Done", "in-review"), ("In Review", "in-progress"),
+                               ("In Progress", "in-progress"), ("In Review", "in-review")):
+            jira = FakeJiraWorkflow(status)
+            js.move(jira, "SCR-1", target)
+            self.assertEqual(jira.posts, [], (status, target))
+            self.assertEqual(jira.status, status)
+
+    def test_workflow_without_review_is_left_alone(self):
+        simple = {"To Do": ("new", [("Start", "Doing", "indeterminate")]),
+                  "Doing": ("indeterminate", [("Finish", "Done", "done")]), "Done": ("done", [])}
+        jira = FakeJiraWorkflow(workflow=simple)
+        self.assertIn("-> Doing", js.move(jira, "SCR-1", "in-progress"), "any in-progress category status works")
+        self.assertIn("no in-review transition", js.move(jira, "SCR-1", "in-review"))
+        self.assertEqual(jira.status, "Doing")
+
+    def test_cli_without_jira_is_a_no_op(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("JIRA_")}
+        script = str(PLUGIN / "skills" / "build-story" / "scripts" / "jira_story.py")
+        r = subprocess.run([sys.executable, script, "SCR-1", "move", "in-progress"], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Jira not configured", r.stdout)
+        r = subprocess.run([sys.executable, script, "not-a-key", "comment", "x"], capture_output=True, text=True, env=env)
         self.assertEqual(r.returncode, 1)
 
 

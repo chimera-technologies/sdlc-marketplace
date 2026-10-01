@@ -4,6 +4,22 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.9.1 (2026-10-01)
+
+- Automatic Build keeps the Jira story in step (new `jira_story.py`,
+  called by `sdlc-build.yml`): a comment with the plan PR link; **In
+  Progress** and a comment when the build starts; when the story PR opens,
+  a comment with its link and result, and **In Review** if the workflow has
+  a status named like "review" (an incomplete, draft build stays In
+  Progress). Done on merge is unchanged (`sdlc-story-link.yml`).
+  Transitions are picked by status category, a story never moves
+  backwards, and Jira errors never fail the build.
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.9.1`. Nothing to configure; stories without a Jira
+  key (Jira off) are skipped.
+
 ## v0.9.0 (2026-10-01)
 
 Every accepted spec gets a Jira Epic and its stories, with or without a

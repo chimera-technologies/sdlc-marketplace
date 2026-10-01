@@ -61,7 +61,12 @@ Jira ticket / document / breach
   until `.sdlc/build.yaml` has a `test_command`. The build may not change
   `.github/`, `.sdlc/`, `specs/`, `plans/` or other SDLC files (hook, and
   reverted before the PR). Works with or without Jira (branches
-  `story/<jira-key>-<name>` or `story/<spec-slug>-s<n>`).
+  `story/<jira-key>-<name>` or `story/<spec-slug>-s<n>`). With Jira, the
+  story follows along: a comment with the plan PR, **In Progress** when the
+  build starts, a comment and **In Review** when the story PR opens (if the
+  workflow has a review status; a draft from an incomplete build stays In
+  Progress), **Done** on merge. Transitions are chosen by status category,
+  so any Jira workflow works, and a story never moves backwards.
 - **PR review**: conformance to plan, spec, design, `REVIEW.md`, `CLAUDE.md`
   and the security policy gates the PR; advisory reviewers only comment.
 - **Test**: tests run only after the review gate; the project's own test
