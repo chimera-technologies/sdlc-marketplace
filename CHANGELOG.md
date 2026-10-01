@@ -4,6 +4,14 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.9.2 (2026-10-01)
+
+- Automatic Build: the preflight no longer runs Graphify's Claude Code
+  integration in headless CI runs (`SDLC_HEADLESS=1`). It added a section
+  to `CLAUDE.md` on every build; CI reverted it before the PR, but the
+  verifier flagged it on every story (S1, S4 in the sandbox). The graph is
+  still built; interactive sessions still get the integration.
+
 ## v0.9.1 (2026-10-01)
 
 - Automatic Build keeps the Jira story in step (new `jira_story.py`,

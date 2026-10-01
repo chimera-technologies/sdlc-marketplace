@@ -13,7 +13,8 @@ Reads .sdlc/build.yaml for the pinned versions. Idempotent:
      under code_paths yet (a first story), it warns, writes the marker
      graphify-out/NO-CODE-YET instead, and continues; runs
      `graphify claude install` once, then moves its machine-specific hooks
-     from the shared .claude/settings.json into .claude/settings.local.json.
+     from the shared .claude/settings.json into .claude/settings.local.json
+     (not in headless CI runs, SDLC_HEADLESS=1: it edits CLAUDE.md).
   2. Ponytail: declares the marketplace (pinned to <ponytail_ref>) and
      enables `ponytail@ponytail` in .claude/settings.json; checks that it is
      active in the current session.
@@ -24,6 +25,7 @@ Exit 0 = ready. Exit 3 = one manual step is needed (printed). Exit 1 = error.
 import argparse
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -190,6 +192,11 @@ def step_graphify(project, cfg, report):
     report.append(f"graphify: graph {'updated' if args[0] == 'update' else 'built'}"
                   + (f" ({m.group(1)} nodes, {m.group(2)} edges)" if m else ""))
 
+    if os.environ.get("SDLC_HEADLESS") == "1":
+        # CI (automatic Build): the skill already tells Claude to query the graph,
+        # and the integration would edit CLAUDE.md, a file the build may not change.
+        report.append("graphify: Claude Code integration skipped (headless)")
+        return
     settings_path = Path(project) / ".claude" / "settings.json"
     local_path = Path(project) / ".claude" / "settings.local.json"
     claude_md = Path(project) / "CLAUDE.md"
