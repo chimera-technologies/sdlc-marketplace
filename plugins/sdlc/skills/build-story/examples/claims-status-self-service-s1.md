@@ -28,6 +28,12 @@ ID. Covers REQ-1 and the logging part of SEC-6.1.
 | AC-2 | Returns status codes, not internal states. | tests/api/test_customer_status.py › "S1 AC-2: status codes, never internal states" |
 | AC-3 | Access is logged with customer ID and time, without claim content. | tests/api/test_customer_status.py › "S1 AC-3: access logged without claim content" |
 
+## Edge cases
+- Customer with no open claims: empty list, 200 (AC-1 test, empty fixture).
+- Claim owned by another customer, asked for by ID: 404, not 403, so its existence is not revealed (AC-1 test).
+- Claim in an internal state with no customer status yet: shown as "In progress", never the internal name (AC-2 test).
+- Logging fails: the request still succeeds and the failure is reported to monitoring; not tested here, the shared logger owns it.
+
 ## Steps
 1. Write the three failing tests against a seeded test database with two customers.
 2. Add the handler: take the customer ID from the verified service token, query open claims for it, map states to codes.

@@ -90,7 +90,18 @@ Present a plan following `${CLAUDE_SKILL_DIR}/templates/plan.md`:
   `tests/`) and a test named for `S<n> AC-<k>` in the language's style:
   `"S1 AC-2: rejects empty names"`, `test_s1_ac_2_rejects_empty_names`,
   `S1Ac2RejectsEmptyNames`.
+- **Edge cases** (always): empty and boundary inputs (0, 1, max, max+1),
+  invalid or hostile input, failures of what the story depends on
+  (storage, network, permissions), repeated or concurrent actions, and the
+  state earlier stories leave behind. For each: how it is handled and the
+  test (or step) that covers it. Ask the graph what calls the code you
+  change, so you also list what this story could break.
 - **Steps**, **Risks and rollback**, **Out of scope**.
+
+Then have the plan reviewed before the person sees it: run `/sdlc:review-plan
+plan=<draft path>` (a fresh pass that looks for missed edge cases and
+potential bugs). Add every edge case it finds to the plan, and fix the plan
+for every critical or high bug; show the person the review with the plan.
 
 Wait for the person to approve the plan. Change it if they ask.
 
@@ -194,6 +205,8 @@ replaces plan mode). Never ask, never wait.
 4. Anything the owner must decide (an open question this story depends on,
    a default you chose) goes in the plan's Risks and rollback section as
    "Decision to confirm: ...". Write nothing else; do not branch or commit.
+   The Edge cases section is required here too; a separate `review-plan`
+   run then reviews the plan for the PR.
 
 ## Headless build (`mode=build plan=plans/<id>.md`)
 

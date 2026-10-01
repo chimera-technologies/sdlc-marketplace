@@ -63,7 +63,7 @@ project by bumping one tag (`/sdlc:init upgrade=vX.Y.Z`).
 ```
 .claude-plugin/marketplace.json      the marketplace
 plugins/sdlc/
-  skills/        init, write-intent, write-spec, review-spec, design-ui, build-story,
+  skills/        init, write-intent, write-spec, review-spec, design-ui, build-story, review-plan,
                  review-story, release, triage, security-policy
                  (each: SKILL.md + templates/, scripts/, examples/, reference/)
   agents/        verifier (Build)
