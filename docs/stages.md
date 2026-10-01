@@ -56,8 +56,13 @@ Jira ticket / document / breach
   finds each spec's first unfinished story from git and the PR list alone.
   No plan yet -> a plan PR (merging it is the plan approval), which shows a
   `review-plan` review by a fresh agent: missed edge cases and potential
-  bugs rated critical / high / low (a critical one makes the PR a draft);
-  every plan has an `Edge cases` section the build implements; plan merged ->
+  bugs rated critical / high / low (a critical one makes the PR a draft).
+  Every edge case and critical or high bug must be fixed in the story: the
+  planner adds each to the plan's `Review findings` with its handling and a
+  `S<n> EC-1` / `S<n> BUG-1` test, the validator requires every ID, and the
+  story PR's traceability check requires every test; low bugs go to the
+  Jira story as a comment. Every plan has an `Edge cases` section the build
+  implements; plan merged ->
   the build runs in CI and opens the story PR (a draft if incomplete);
   story PR merged -> the next story. One story per spec in flight; a closed
   plan or story PR stops that spec until someone re-runs it. Nothing starts

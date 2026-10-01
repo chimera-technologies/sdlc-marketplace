@@ -4,6 +4,29 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.12.0 (2026-10-01)
+
+What the plan review finds now gets fixed in the story, not just reported.
+
+- **Must fix**: every missed edge case and every critical or high bug from
+  `review-plan`. `render_plan_review.py` numbers them (`EC-n`, `BUG-n`) and
+  writes `--must-fix`; the plan job then runs `build-story mode=revise`,
+  which handles each in the plan and lists it under a new
+  `## Review findings` section (`| ID | Finding | Handling | Test |`).
+- **Enforced**: `validate_plan.py --review` fails the plan when a must-fix
+  ID has no row, and `--check-tests` (the story PR's traceability check)
+  fails when a finding's `S<n> EC-1` / `S<n> BUG-1` test does not exist.
+  The verifier and the review gate treat an unfixed finding as high; the
+  build reports PASS only when every finding is fixed.
+- **Decisions**: a finding that needs a product decision is written as
+  `Decision needed: ...`; the plan PR opens as a draft for the owner.
+- **Low bugs** are optional: listed in the plan PR and posted as a comment
+  on the Jira story.
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.12.0`. Nothing to configure.
+
 ## v0.11.0 (2026-10-01)
 
 Every plan is checked for missed edge cases and potential bugs before it is

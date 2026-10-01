@@ -55,7 +55,7 @@ Arguments: `$ARGUMENTS`
 3. **Write the answers** to `.sdlc-output/init-answers.json`:
 
    ```json
-   {"sdlc_ref": "v0.11.0", "base_branch": "main",
+   {"sdlc_ref": "v0.12.0", "base_branch": "main",
     "owners": {"product_owner": "@po", "service_owner": "@org/sre", "tech_lead": "@lead", "security_owner": "@lead"},
     "jira": {"enabled": true, "site": "acme.atlassian.net", "space_key": "ACM"},
     "stages": {"ui_design": false}, "auto_build": true,

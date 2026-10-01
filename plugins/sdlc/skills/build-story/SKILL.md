@@ -100,8 +100,13 @@ Present a plan following `${CLAUDE_SKILL_DIR}/templates/plan.md`:
 
 Then have the plan reviewed before the person sees it: run `/sdlc:review-plan
 plan=<draft path>` (a fresh pass that looks for missed edge cases and
-potential bugs). Add every edge case it finds to the plan, and fix the plan
-for every critical or high bug; show the person the review with the plan.
+potential bugs). **Every edge case and every critical or high bug it finds
+must be fixed in this story**: handle each in the plan (Files, Steps, Edge
+cases) and list it under `## Review findings` (after Edge cases) as
+`| EC-1 or BUG-1 | finding | handling | test file › "S<n> EC-1: ..." |`, numbered
+as `render_plan_review.py` numbers them (edge cases in review order, bugs
+critical first). Low bugs need no fix: comment them on the Jira story if the
+Atlassian MCP is connected. Show the person the review with the plan.
 
 Wait for the person to approve the plan. Change it if they ask.
 
@@ -208,6 +213,23 @@ replaces plan mode). Never ask, never wait.
    The Edge cases section is required here too; a separate `review-plan`
    run then reviews the plan for the PR.
 
+## Headless revise (`mode=revise plan=plans/<id>.md review=<must-fix.json>`)
+
+The plan review found edge cases or critical or high bugs; they **must be
+fixed in this story**. The file `review=` lists them (`id`, `kind`,
+`severity`, `text`). Never ask, never wait; write only the plan.
+
+1. For each finding, change the plan so the story handles it: the Files,
+   Steps and Edge cases it needs, and a test named `S<n> <id>: ...` (for
+   example `"S5 EC-1: double-click on Delete removes one task"`).
+2. Add `## Review findings` after `## Edge cases`, one row per finding, every
+   ID exactly once: `| <id> | <finding> | <handling> | <test file › "S<n> <id>: ..."> |`.
+3. A finding that would change the spec's scope or needs a product decision
+   gets `Decision needed: <the question>` as its handling (no test); the
+   workflow opens the plan PR as a draft for the owner.
+4. Validate: `python3 "${CLAUDE_SKILL_DIR}/scripts/validate_plan.py" --review <must-fix.json> plans/<id>.md`
+   and fix every error.
+
 ## Headless build (`mode=build plan=plans/<id>.md`)
 
 The workflow has checked out the plan's branch and opens the story PR from
@@ -218,13 +240,15 @@ change). Never ask, never wait.
 
 1. Step 0 (preflight), as above.
 2. Steps 4, 5 and 6 (tests first, implement until green, verifier), using
-   the plan's Files and Tests tables. Install dependencies yourself with the
+   the plan's Files and Tests tables **and every row of its Review findings**
+   (each one fixed, with its `S<n> <id>` test passing). Install dependencies yourself with the
    stack's commands when the story adds them (for example `npm install`
    for a new `package.json`). Do not run `git` commands.
 3. Write `.sdlc-output/build-report.md` for the PR body:
    - first line exactly `RESULT: PASS` (verifier PASS, full suite green,
-     `--check-tests` clean) or `RESULT: INCOMPLETE`;
-   - the AC-to-test table (criterion, test file, test name, passing);
+     `--check-tests` clean, every Review finding fixed) or `RESULT: INCOMPLETE`;
+   - the AC-to-test table (criterion, test file, test name, passing), and
+     the Review findings table (id, how it was fixed, test, passing);
    - the verifier's report;
    - for INCOMPLETE: what is blocking and what a person should do next
      (after 5 failed rounds on one test, or two verifier FAILs, stop and

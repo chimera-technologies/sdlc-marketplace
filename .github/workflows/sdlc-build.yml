@@ -239,15 +239,45 @@ jobs:
             > "$RUNNER_TEMP/plan-review-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/plan-review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
 
-      - name: Validate the plan and build the PR body
-        id: check
+      - name: Number the review findings
+        id: findings
         run: |
           set -euo pipefail
-          if python3 "$SCRIPTS/validate_plan.py" "plans/$ID.md" 2> "$RUNNER_TEMP/validation.txt"; then valid=true; else valid=false; fi
-          cat "$RUNNER_TEMP/validation.txt"
+          # Edge cases and critical or high bugs must be fixed in this story; low bugs go to Jira.
           review=$(python3 "$PLUGIN_DIR/skills/review-plan/scripts/render_plan_review.py" .sdlc-output/plan-review.json \
-                   --markdown "$RUNNER_TEMP/plan-review.md")
-          echo "Plan review: $review"
+                   --markdown "$RUNNER_TEMP/plan-review.md" --must-fix "$RUNNER_TEMP/must-fix.json" --low "$RUNNER_TEMP/low.txt")
+          count=$(jq 'length' "$RUNNER_TEMP/must-fix.json")
+          echo "Plan review: $review; must fix: $count"
+          { echo "review=$review"; echo "count=$count"; } >> "$GITHUB_OUTPUT"
+
+      - name: Fix the findings in the plan (build-story mode=revise, headless)
+        if: steps.findings.outputs.count != '0'
+        continue-on-error: true   # validation below reports anything left unhandled
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/must-fix.json" .sdlc-output/must-fix.json
+          claude -p "/sdlc:build-story mode=revise plan=plans/$ID.md review=.sdlc-output/must-fix.json" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --model "$MODEL" \
+            --max-turns 60 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Edit,Bash(python3 *validate_plan.py*),Bash(graphify *),Bash(python3 -m graphify *)" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/plan-revise-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/plan-revise-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Validate the plan and build the PR body
+        id: check
+        env:
+          REVIEW: ${{ steps.findings.outputs.review }}
+          COUNT: ${{ steps.findings.outputs.count }}
+        run: |
+          set -euo pipefail
+          # Every must-fix finding needs a Review findings row with its handling and test.
+          if python3 "$SCRIPTS/validate_plan.py" --review "$RUNNER_TEMP/must-fix.json" "plans/$ID.md" 2> "$RUNNER_TEMP/validation.txt"; then valid=true; else valid=false; fi
+          cat "$RUNNER_TEMP/validation.txt"
+          decisions=$(grep -c 'needs the owner.s decision' "$RUNNER_TEMP/validation.txt" || true)
+          review=$REVIEW
           python3 "$VALIDATE_SPEC" --json "$SPEC" > "$RUNNER_TEMP/spec.json" 2>/dev/null || echo '{}' > "$RUNNER_TEMP/spec.json"
           owner=$(jq -r '.owner // ""' "$RUNNER_TEMP/spec.json")
           branch=$(sed -n 's/^branch:[[:space:]]*//p' "plans/$ID.md" | head -n1)
@@ -261,24 +291,30 @@ jobs:
               echo '```'; cat "$RUNNER_TEMP/validation.txt"; echo '```'; echo
             fi
             cat "$RUNNER_TEMP/plan-review.md"; echo
+            if [ "$COUNT" != "0" ] && [ "$valid" = "true" ]; then
+              echo "✅ **All $COUNT must-fix findings are in the plan's Review findings**, each with its handling and test; the build must fix them and the story PR's traceability check requires their tests."; echo
+            fi
+            if [ "$decisions" != "0" ]; then
+              echo "> [!IMPORTANT]"; echo "> $decisions finding(s) need your decision (\"Decision needed\" in Review findings), so this PR is a draft. Answer them in the plan, then mark it ready."; echo
+            fi
             echo "### Review checklist"
             echo "- [ ] Every acceptance criterion has a test, in order"
-            echo "- [ ] The Edge cases section covers what this story must handle; accepted review findings are added to the plan"
-            echo "- [ ] No critical or high bug from the plan review is left unaddressed"
+            echo "- [ ] Every edge case and critical or high bug from the review has a row in Review findings, and its handling really fixes it"
+            echo "- [ ] The Edge cases section covers what this story must handle"
             echo "- [ ] The files and steps are the smallest change that meets the story"
             echo "- [ ] The Design section names this story's screens (if it has any)"
             echo "- [ ] Decisions to confirm (Risks and rollback) are answered"
             echo
             echo "<details><summary>Evidence</summary>"
             echo
-            echo "- Skills: sdlc:build-story mode=plan, sdlc:review-plan @ \`${{ inputs.sdlc_repo }}@${{ inputs.sdlc_ref }}\`"
+            echo "- Skills: sdlc:build-story mode=plan and mode=revise, sdlc:review-plan @ \`${{ inputs.sdlc_repo }}@${{ inputs.sdlc_ref }}\`"
             echo "- Model: $MODEL"
             echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (transcript artifact)"
             echo "</details>"
           } > "$RUNNER_TEMP/pr-body.md"
           reviewer=${owner#@}; [[ "$reviewer" == */* ]] && reviewer=""   # teams are routed by CODEOWNERS, not here
-          # A critical bug makes the plan PR a draft, like an invalid plan.
-          draft=false; if [ "$valid" = "false" ] || [ "$review" = "blocking" ]; then draft=true; fi
+          # Draft when the plan is invalid (incl. an unhandled finding), a bug is critical, or a finding needs a decision.
+          draft=false; if [ "$valid" = "false" ] || [ "$review" = "blocking" ] || [ "$decisions" != "0" ]; then draft=true; fi
           { echo "valid=$valid"; echo "draft=$draft"; echo "review=$review"; echo "reviewer=$reviewer"; } >> "$GITHUB_OUTPUT"
 
       - name: Upload transcript (evidence)
@@ -289,7 +325,9 @@ jobs:
           path: |
             ${{ runner.temp }}/plan-transcript.jsonl
             ${{ runner.temp }}/plan-review-transcript.jsonl
+            ${{ runner.temp }}/plan-revise-transcript.jsonl
             .sdlc-output/plan-review.json
+            ${{ runner.temp }}/must-fix.json
           if-no-files-found: ignore
           retention-days: 90
 
@@ -320,8 +358,13 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           KEY: ${{ steps.jira.outputs.key }}
           URL: ${{ steps.pr.outputs.pull-request-url }}
+          COUNT: ${{ steps.findings.outputs.count }}
         run: |
-          python3 "$SCRIPTS/jira_story.py" "$KEY" comment "Plan ready for review: $URL. Merging it approves the plan and starts the build."
+          python3 "$SCRIPTS/jira_story.py" "$KEY" comment "Plan ready for review: $URL. Merging it approves the plan and starts the build. Plan review: $COUNT edge case(s) and critical or high bug(s) to fix in this story."
+          # Low bugs need no fix; they are recorded on the story.
+          if [ -s "$RUNNER_TEMP/low.txt" ]; then
+            python3 "$SCRIPTS/jira_story.py" "$KEY" comment "$(cat "$RUNNER_TEMP/low.txt")"
+          fi
 
   build:
     needs: next

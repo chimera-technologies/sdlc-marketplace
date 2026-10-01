@@ -31,7 +31,7 @@ const DEFAULT_LENSES = {
   ],
   story: [
     { id: 'scope', focus: 'Check 1 (scope): every changed file is in the plan Files table; nothing from Out of scope is built' },
-    { id: 'criteria', focus: 'Check 2 (acceptance criteria) and 3 (spec): each AC has a test titled S<n> AC-<k> that checks the described behaviour; REQ-n met as written, including limits and messages' },
+    { id: 'criteria', focus: 'Check 2 (acceptance criteria and review findings) and 3 (spec): each AC has a test titled S<n> AC-<k> that checks the described behaviour; every row of the plan Review findings is fixed and tested as S<n> <id>; REQ-n met as written, including limits and messages' },
     { id: 'design', focus: 'Check 4 (design): the UI matches the story screens and Tokens (skip with no findings if the story has no screens)' },
     { id: 'rules-security', focus: 'Checks 5, 6 and 7: REVIEW.md "Always check" rules, CLAUDE.md stack rules, and the security rules that apply' },
   ],

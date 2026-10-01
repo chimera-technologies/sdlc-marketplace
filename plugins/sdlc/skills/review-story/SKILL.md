@@ -46,6 +46,10 @@ dependency, build or report folders (`node_modules/`, `.venv/`, `target/`,
    the plan itself included). Nothing from the spec's Out of scope is built.
 2. **Acceptance criteria**: each AC has a test titled `S<n> AC-<k>` that
    checks the behaviour the criterion describes, not something weaker.
+   **Review findings** (the plan's `## Review findings`: edge cases and
+   critical or high bugs from the plan review) must all be fixed: each one
+   implemented as its Handling says, with an `S<n> <id>` test of its
+   scenario. An unfixed one is `high`.
 3. **Spec**: the story's requirements (REQ-n) are met as written, including
    validation limits, messages and data rules.
 4. **Design** (when screens exist): the UI matches the story's screens:
