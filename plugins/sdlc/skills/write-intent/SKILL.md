@@ -9,7 +9,8 @@ description: Use whenever a problem, idea, feature request, Jira ticket,
   intent", when brainstorming reaches the point where it must be committed
   for someone else to act on, or when invoked headless with mode=headless.
   Interactively it can split a requirement document into several intents
-  and create a Jira Epic for each (after the person confirms).
+  and create a Jira Epic for each (after the person confirms); large
+  documents go through a Claude Code workflow.
 argument-hint: "[mode=headless] [source=jira|maintain|claude-security|claude-tag] [record_id=ABC-123] [input=<path>] [slug=<slug>]"
 ---
 
@@ -84,6 +85,33 @@ come from the accepted spec at the Design to Build boundary.
 
 With several intents, run Steps 2 to 5 for each one in turn, one file and
 one PR each, and list the sibling slugs in each intent's `related` field.
+
+## Step 1c: large documents (Claude Code workflow)
+
+Read `${CLAUDE_SKILL_DIR}/../../reference/workflows.md` for the setting and
+the threshold. When it applies, do Step 1b and Steps 2 to 4 with the
+`requirements-to-intents` workflow instead of in this session:
+
+1. **Scout**: make the document readable as text (Step 1), then list its
+   sections yourself: `[{"id": "s1", "title": "...", "where": "heading or pages"}]`.
+2. **Split**: run the Workflow tool with `scriptPath`
+   `${CLAUDE_SKILL_DIR}/../../workflows/requirements-to-intents.js` and `args`
+   `{"mode": "split", "document": "<path>", "sections": [...], "skill":
+   "<absolute path of this SKILL.md>", "template": "<absolute path of
+   templates/intent.md>", "owners": ".sdlc/owners.yaml", "today":
+   "<YYYY-MM-DD>", "author": "<originator>"}`. Show the person the proposed
+   intents (title, sections, why each stands alone) and ask them to confirm
+   or change the split, as in Step 1b.
+3. **Draft**: run it again with the same `args` plus `"mode": "draft"`,
+   `"intents"` (the confirmed split) and `"existing"` (slugs already in
+   `intent/`). It drafts every intent, has skeptics check each one against
+   the document and these rules, fixes what they find, and lists
+   requirements no intent covers.
+4. Write each returned `markdown` to `intent/<slug>.md` and run the
+   validator on each (Step 4); fix what it reports yourself. Show the person
+   the `uncovered` list: each gap is added to an intent, becomes a new
+   intent, or is consciously left out.
+5. Continue with Step 5 for each intent: one branch and one PR each.
 
 ## Step 2: fill the content (interactive)
 

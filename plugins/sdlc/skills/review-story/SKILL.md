@@ -56,6 +56,15 @@ dependency, build or report folders (`node_modules/`, `.venv/`, `target/`,
 7. **Security**: the SEC rules that apply (input validation, no secrets,
    no unsafe HTML, no personal data in logs).
 
+**Large PRs: run the review panel.** Read
+`${CLAUDE_SKILL_DIR}/../../reference/workflows.md` for the setting and the
+threshold. When it applies, after reading the plan (Read, step 2), run the
+Workflow tool with `scriptPath` `${CLAUDE_SKILL_DIR}/../../workflows/review-panel.js`
+and `args` `{"kind": "story", "skill": "<absolute path of this SKILL.md>",
+"target": "the story PR: git diff <base>...HEAD, plan plans/<id>.md"}`. Its
+result has the shape below (verdict, summary, findings): write it as the
+output. Otherwise do the checks yourself.
+
 Severity: `high` = does not do what the plan, spec or design require,
 breaks a REVIEW.md "high" rule, or breaches a security rule. `medium` = a
 real gap the owner must decide on. `low` = clarity. Cite `file:line` for
