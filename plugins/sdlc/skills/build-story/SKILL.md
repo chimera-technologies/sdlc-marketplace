@@ -183,6 +183,13 @@ smaller model with fresh context and reports PASS or FAIL per criterion.
   Grep. Read only the files in the plan, and only the parts you need.
 - Run the story's test file, not the whole suite, while iterating; use the
   short reporter; read only the first error of a failing test.
+- Graphify does not index Terraform (`.tf`) or YAML (Kubernetes manifests,
+  Helm values, pipelines): for those, read the files the plan names
+  directly, and apply `sdlc:infra-policy`. Never run `terraform apply`,
+  `kubectl apply` or `helm upgrade` against a real environment while
+  building: those run only in the release, behind its approvals. Use
+  `terraform validate`, `plan` against mocks or a local backend, `helm
+  template`, `kubeconform`, or a local cluster (kind) in tests.
 - Never read dependency, build or report folders (`node_modules/`,
   `.venv/`, `target/`, `bin/`, `obj/`, `dist/`, `test-results/`,
   `playwright-report/`, `graphify-out/cache/`) or lock files.

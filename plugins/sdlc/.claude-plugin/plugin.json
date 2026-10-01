@@ -1,7 +1,7 @@
 {
   "name": "sdlc",
   "displayName": "AI-native SDLC",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "AI-native SDLC for any project and tech stack: Plan (write-intent), Design (write-spec, review-spec, design-ui), Build (build-story with Graphify and Ponytail, verifier), PR review (review-story), Test, Deploy (release), Maintain (triage), onboarding (init), guardrail hooks, and reusable GitHub workflows.",
   "author": {
     "name": "sdlc-marketplace maintainers"

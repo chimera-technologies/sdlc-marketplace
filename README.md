@@ -38,9 +38,16 @@ lists requirements no intent covers. Small inputs stay in one session. See
 Nothing is tied to a language. The spec's tech lead decides the stack;
 `/sdlc:init stack=specs/<slug>.md` records it in `.sdlc/build.yaml`
 (`toolchains: [java@21]`, `test_command: mvn -B test`, ...). CI installs it
-with the `setup-stack` action (Node, Python, Java, .NET, Go built in; any
-other toolchain through `setup_command`) and runs the project's own commands.
-Test names follow `S<n> AC-<k>` in each language's style.
+with the `setup-stack` action (Node, Python, Java, .NET, Go, Terraform, Helm,
+kubectl built in; any other toolchain through `setup_command`) and runs the
+project's own commands. Test names follow `S<n> AC-<k>` in each language's style.
+
+The same goes for **where it runs**: the architect picks the cloud (AWS,
+Azure, GCP or none) and the IaC tool in the spec, and `.sdlc/deploy.yaml`
+records it. Releases log in with OIDC, plan Terraform on staging, show the
+production plan to its approvers and apply exactly that plan, stop on
+anything destroyed or replaced, and smoke-test each environment.
+`sdlc:infra-policy` covers IaC, images, Kubernetes and the pipeline.
 
 ## How a project uses it
 
@@ -64,7 +71,7 @@ project by bumping one tag (`/sdlc:init upgrade=vX.Y.Z`).
 .claude-plugin/marketplace.json      the marketplace
 plugins/sdlc/
   skills/        init, write-intent, write-spec, review-spec, design-ui, build-story, review-plan,
-                 review-story, release, triage, security-policy
+                 review-story, release, triage, security-policy, infra-policy
                  (each: SKILL.md + templates/, scripts/, examples/, reference/)
   agents/        verifier (Build)
   workflows/     Claude Code workflows for big jobs: requirements-to-intents, review-panel

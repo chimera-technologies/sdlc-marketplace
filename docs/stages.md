@@ -80,6 +80,13 @@ Jira ticket / document / breach
 - **Test**: tests run only after the review gate; the project's own test
   command from `.sdlc/build.yaml`, on its own toolchain.
 - **Deploy**: a validated release record; production needs a named human
-  approval (GitHub environment reviewers); rollback is a new record.
+  approval (GitHub environment reviewers); rollback is a new record. On the
+  cloud the spec chose (AWS, Azure, GCP; OIDC, no long-lived keys):
+  Terraform is planned and applied on staging, the production plan is shown
+  to the approvers and exactly that plan is applied; anything destroyed or
+  replaced stops the release until a person re-runs it with
+  `allow_destroy`; `smoke_command` after each deploy, and a staging failure
+  means production never runs. `sdlc:infra-policy` (INF rules) applies to
+  every spec, plan and PR that touches infrastructure.
 - **Maintain**: checks are plain commands in any language; breaches become
   intents, deduplicated; triage chooses rollback (runbook) or fix (story).

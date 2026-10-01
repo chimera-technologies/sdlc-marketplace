@@ -171,7 +171,9 @@ merged means accepted, and closed means rejected.
 
 **Risk rubric** (the highest match wins):
 - `high`: touches auth, payments, PII or regulated data, more than two
-  systems, a public API contract, or data migration.
+  systems, a public API contract, or data migration; or infrastructure:
+  identity and access (IAM), network exposure, data stores, IaC state,
+  anything that would be destroyed or replaced, or the production pipeline.
 - `medium`: user-visible behaviour change in one or two systems.
 - `low`: internal-only, reversible, single system.
 

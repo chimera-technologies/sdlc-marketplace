@@ -35,6 +35,13 @@ class StackTest(unittest.TestCase):
         self.assertEqual(out["test_command"], "npx playwright test")
         self.assertEqual(out["report_path"], "playwright-report/")
 
+    def test_infrastructure_toolchains(self):
+        out, errors = stack.read_stack(self.repo("toolchains: [terraform@1.9.8, helm@3.16.2, kubectl@v1.31.0]\n"
+                                                 "test_command: terraform -chdir=infra validate\n"))
+        self.assertEqual(errors, [])
+        # setup-terraform takes 1.9.8; setup-helm and setup-kubectl take v-prefixed versions.
+        self.assertEqual((out["terraform"], out["helm"], out["kubectl"]), ("1.9.8", "v3.16.2", "v1.31.0"))
+
     def test_dotnet_and_go(self):
         out, errors = stack.read_stack(self.repo("toolchains: [dotnet@8.0, go@1.23]\ntest_command: dotnet test\n"))
         self.assertEqual(errors, [])

@@ -16,6 +16,15 @@ creates the GitHub release, deploys to staging with the project's
 `deploy_command`, and deploys to production only after the reviewers of the
 production environment approve. Claude never deploys or approves.
 
+With infrastructure (`.sdlc/deploy.yaml` `iac: terraform`, on the cloud the
+spec chose): staging is planned and applied first; the production plan is
+shown in the run for the approvers, and exactly that plan is applied after
+approval; `smoke_command` runs after each deploy and a failure on staging
+stops production. A plan that destroys or replaces anything stops the
+release: say so in the record's Risks section if it is expected, and tell
+the person they must re-run the release with `allow_destroy` (Actions >
+SDLC push > Run workflow, rerun `release`) after reading the plan.
+
 Files in this skill:
 - Template: `${CLAUDE_SKILL_DIR}/templates/release.md`
 - Validator: `${CLAUDE_SKILL_DIR}/scripts/validate_release.py`

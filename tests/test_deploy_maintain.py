@@ -4,6 +4,7 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -162,6 +163,122 @@ class InitDeployWiringTest(unittest.TestCase):
         release_job = push[push.index("  release:"):]
         self.assertIn("DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}", release_job)
         self.assertIn("runbooks", init.FOLDERS)
+
+    def test_release_caller_can_log_in_with_oidc_and_allow_destroy(self):
+        a, _ = init.normalize({"sdlc_ref": "v0.6.0", "owners": {r: "@x" for r in ("product_owner", "service_owner", "tech_lead")}})
+        push = init.render_callers(a)[".github/workflows/sdlc-push.yml"]
+        release_job = push[push.index("  release:"):]
+        self.assertIn("    permissions:\n      contents: read\n      id-token: write\n", release_job)
+        self.assertIn("allow_destroy: ${{ inputs.rerun == 'release' && inputs.allow_destroy || false }}", release_job)
+        self.assertIn("      allow_destroy:\n        description:", push)
+
+
+IAC = load("iac", SKILLS / "release" / "scripts" / "iac.py")
+
+
+def plan_json(*actions):
+    return {"resource_changes": [{"address": f"aws_x.r{i}", "change": {"actions": a}} for i, a in enumerate(actions)]}
+
+
+class InfraDeployConfigTest(unittest.TestCase):
+    def write(self, d, text):
+        (Path(d) / ".sdlc").mkdir(exist_ok=True)
+        (Path(d) / ".sdlc" / "deploy.yaml").write_text(text, encoding="utf-8")
+        return dc.load(d)
+
+    def test_cloud_and_iac(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual((dc.load(d)["cloud"], dc.load(d)["iac"]), ("none", "none"))
+            cfg = self.write(d, "cloud: gcp\niac: terraform\niac_dir: infra/live   # c\niac_var_file: envs/{env}.tfvars\n")
+        self.assertEqual((cfg["cloud"], cfg["iac"], cfg["iac_dir"], cfg["iac_var_file"]), ("gcp", "terraform", "infra/live", "envs/{env}.tfvars"))
+        self.assertEqual(dc.errors(cfg), [])
+
+    def test_invalid_values(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = self.write(d, "cloud: oracle\niac: pulumi\niac_dir: ../outside\n")
+        text = " ".join(dc.errors(cfg))
+        for frag in ("cloud must be one of", "iac must be one of", "iac_dir must be a relative path"):
+            self.assertIn(frag, text)
+
+    def test_deploys_output(self):
+        script = SKILLS / "release" / "scripts" / "deploy_config.py"
+        with tempfile.TemporaryDirectory() as d:
+            self.write(d, "iac: terraform\n")
+            r = subprocess.run([sys.executable, str(script), "--root", d], capture_output=True, text=True)
+            self.assertIn("deploys=true", r.stdout)
+            self.write(d, "cloud: oracle\n")
+            r = subprocess.run([sys.executable, str(script), "--root", d], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1)
+
+    def test_init_render_and_record(self):
+        a, _ = init.normalize({"sdlc_ref": "v0.6.0", "owners": {r: "@x" for r in ("product_owner", "service_owner", "tech_lead")}})
+        with tempfile.TemporaryDirectory() as d:
+            cfg = self.write(d, init.render_deploy(a))
+            self.assertEqual((cfg["cloud"], cfg["iac"], cfg["production_plan_environment"]), ("none", "none", "production-plan"))
+            init.set_deploy(d, {"cloud": "azure", "iac": "terraform", "smoke_command": "npm run smoke -- --reporter=line"})
+            cfg = dc.load(d)
+            text = (Path(d) / ".sdlc" / "deploy.yaml").read_text(encoding="utf-8")
+            self.assertEqual((cfg["cloud"], cfg["iac"], cfg["smoke_command"]), ("azure", "terraform", "npm run smoke -- --reporter=line"))
+            self.assertIn("# none, aws, azure or gcp", text, "comments are kept")
+            with self.assertRaises(SystemExit):
+                init.set_deploy(d, {"cloud": "oracle"})
+
+
+class IacPlanTest(unittest.TestCase):
+    def test_changes_counts_and_risky(self):
+        counts, risky = IAC.changes(plan_json(["create"], ["update"], ["delete"], ["delete", "create"], ["create", "delete"], ["no-op"]))
+        self.assertEqual(counts, {"create": 1, "update": 1, "replace": 2, "destroy": 1})
+        self.assertEqual([a for a, _ in risky], ["destroy", "replace", "replace"])
+
+    def test_summary_stops_on_destroy_unless_allowed(self):
+        counts, risky = IAC.changes(plan_json(["create"], ["delete"]))
+        stopped = IAC.summary("production", counts, risky, allowed=False)
+        self.assertIn("**Stopped: nothing was applied.**", stopped)
+        self.assertIn("`aws_x.r1`", stopped)
+        self.assertIn("Destroy allowed for this run", IAC.summary("production", counts, risky, allowed=True))
+        self.assertIn("Nothing is destroyed or replaced", IAC.summary("staging", *IAC.changes(plan_json(["create"])), allowed=False))
+
+    def test_commands_use_the_environment(self):
+        cfg = {"iac_dir": "infra", "iac_backend_config": "envs/{env}.backend.hcl", "iac_var_file": "envs/{env}.tfvars"}
+        self.assertIn("-backend-config=envs/production.backend.hcl", IAC.init_cmd(cfg, "production"))
+        plan = IAC.plan_cmd(cfg, "staging", "p.tfplan")
+        self.assertIn("-var-file=envs/staging.tfvars", plan)
+        self.assertIn("-chdir=infra", plan)
+        self.assertTrue(any(a.startswith("-out=") for a in plan))
+        bare = {"iac_dir": "infra", "iac_backend_config": "", "iac_var_file": ""}
+        self.assertFalse(any("-backend-config" in a or "-var-file" in a for a in IAC.init_cmd(bare, "x") + IAC.plan_cmd(bare, "x", "p")))
+
+    def test_cli_refuses_without_terraform_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = subprocess.run([sys.executable, str(SKILLS / "release" / "scripts" / "iac.py"), "plan", "--env", "staging",
+                                "--root", d, "--out", "p", "--summary", "s"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("iac is 'none'", r.stderr)
+
+
+class DetectInfraTest(unittest.TestCase):
+    def test_detects_terraform_docker_helm_and_manifests(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for rel, text in {"infra/main.tf": 'resource "x" "y" {}\n', "Dockerfile": "FROM node:22-alpine\n",
+                              "charts/app/Chart.yaml": "apiVersion: v2\nname: app\n",
+                              "k8s/deploy.yaml": "apiVersion: apps/v1\nkind: Deployment\n",
+                              ".github/workflows/ci.yml": "name: ci\non: push\n",
+                              "node_modules/x/main.tf": "ignored\n"}.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(text, encoding="utf-8")
+            infra = init.detect_infra(root)
+        self.assertEqual(len(infra["found"]), 4, infra["found"])
+        self.assertEqual(set(infra["toolchains"]), {"terraform@1.9.8", "helm@3.16.2", "kubectl@1.31.0"})
+        self.assertEqual(infra["deploy"], {"iac": "terraform", "iac_dir": "infra"})
+        self.assertIn("infra/", infra["code_paths"])
+        self.assertIn("Dockerfile", infra["code_paths"])
+        self.assertFalse(any("node_modules" in f or ".github" in f for f in infra["found"]))
+        self.assertNotIn("cloud", infra["deploy"], "the cloud is the architect's decision, never detected")
+
+    def test_nothing_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(init.detect_infra(d)["found"], [])
 
 
 if __name__ == "__main__":

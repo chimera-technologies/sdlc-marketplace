@@ -55,7 +55,7 @@ Arguments: `$ARGUMENTS`
 3. **Write the answers** to `.sdlc-output/init-answers.json`:
 
    ```json
-   {"sdlc_ref": "v0.12.0", "base_branch": "main",
+   {"sdlc_ref": "v0.13.0", "base_branch": "main",
     "owners": {"product_owner": "@po", "service_owner": "@org/sre", "tech_lead": "@lead", "security_owner": "@lead"},
     "jira": {"enabled": true, "site": "acme.atlassian.net", "space_key": "ACM"},
     "stages": {"ui_design": false}, "auto_build": true,
@@ -83,10 +83,25 @@ After a spec's Technology and architecture decision is accepted:
    else via `setup_command`), `install_command`, `test_command`,
    `test_file_command` (with `{file}`), `test_paths`, `code_paths` and
    `report_path`. Commands must not contain `#`.
+   If the spec decided where it runs, also propose a `deploy` object for
+   `.sdlc/deploy.yaml`, using only what the spec decided: `cloud` (`none`,
+   `aws`, `azure`, `gcp`), `iac` (`none`, `terraform`), `iac_dir`,
+   `iac_var_file` and `iac_backend_config` (with `{env}`), `deploy_command`
+   (for example `helm upgrade --install app charts/app -f charts/app/values-$SDLC_ENV.yaml`)
+   and `smoke_command` (reads `SMOKE_URL`). Infrastructure tools are
+   toolchains (`terraform@<v>`, `helm@<v>`, `kubectl@<v>`), and their checks
+   go in `test_command` (for example `terraform fmt -check -recursive &&
+   terraform -chdir=infra validate && tflint --recursive && checkov -d infra`).
+   `--detect` lists what it finds (`infra`: Terraform, Dockerfiles, charts,
+   manifests) as suggestions.
 2. Confirm with the person, write them to `.sdlc-output/init-stack.json`,
    and run `python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --stack .sdlc-output/init-stack.json`.
-3. Commit `.sdlc/build.yaml` on a `sdlc/stack-<slug>` branch and open a PR.
-   Build stories can start once it merges.
+3. Commit `.sdlc/build.yaml` (and `.sdlc/deploy.yaml` if it changed) on a
+   `sdlc/stack-<slug>` branch and open a PR. Build stories can start once it
+   merges. With a cloud, tell the person what the release needs: GitHub
+   environments `staging`, `production-plan` (no reviewers) and `production`
+   (reviewers), each with its OIDC identity variables (the init checklist
+   lists them), and the cloud set up to trust this repo's OIDC tokens.
 
 ## Upgrade
 
