@@ -161,6 +161,58 @@ class PlanEdgeCasesTest(Repo):
         self.assertError(vp.validate(self.plan(moved), self.root)[1], "section headings must be exactly")
 
 
+class ReviewFindingsTest(Repo):
+    """The plan review's must-fix findings, carried into the plan and its tests."""
+
+    ROWS = ('| EC-1 | Customer with two accounts | merge by customer ID (Step 2) | '
+            'tests/api/test_customer_status.py › "S1 EC-1: two accounts, one list" |\n'
+            '| BUG-1 | 404 vs 403 leaks claim ids | always 404 (Step 3) | '
+            'tests/api/test_customer_status.py › "S1 BUG-1: never 403" |\n')
+
+    def with_findings(self, rows=None):
+        section = "## Review findings\n| ID | Finding | Handling | Test |\n|---|---|---|---|\n" + (self.ROWS if rows is None else rows) + "\n"
+        return self.plan(self.plan_text.replace("## Steps", section + "## Steps"))
+
+    def test_valid_rows(self):
+        _, errors, _ = vp.validate(self.with_findings(), self.root, must_fix=["EC-1", "BUG-1"])
+        self.assertEqual(errors, [])
+
+    def test_every_must_fix_id_needs_a_row(self):
+        _, errors, _ = vp.validate(self.with_findings(), self.root, must_fix=["EC-1", "EC-2", "BUG-1"])
+        self.assertError(errors, "Review findings has no row for EC-2")
+        _, errors, _ = vp.validate(self.plan(), self.root, must_fix=["EC-1"])
+        self.assertError(errors, "no row for EC-1")
+
+    def test_row_needs_a_named_test(self):
+        rows = '| EC-1 | Two accounts | merge them | a manual check |\n'
+        _, errors, _ = vp.validate(self.with_findings(rows), self.root, must_fix=["EC-1"])
+        self.assertError(errors, 'a test for "S1 EC-1"')
+
+    def test_decision_needed_warns(self):
+        rows = '| BUG-1 | Leaks ids | Decision needed: should admins see other customers? | none |\n'
+        _, errors, warnings = vp.validate(self.with_findings(rows), self.root, must_fix=["BUG-1"])
+        self.assertEqual(errors, [])
+        self.assertTrue(any("needs the owner's decision" in w for w in warnings), warnings)
+
+    def test_check_tests_requires_the_finding_tests(self):
+        (self.root / "tests" / "api" / "test_customer_status.py").write_text(TEST_FILE, encoding="utf-8")
+        _, errors, _ = vp.validate(self.with_findings(), self.root, check_tests=True)
+        self.assertError(errors, 'no test titled "S1 EC-1: ..."')
+        self.assertError(errors, 'no test titled "S1 BUG-1: ..."')
+        (self.root / "tests" / "api" / "test_customer_status.py").write_text(
+            TEST_FILE + 'test("S1 EC-1: two accounts", () => {});\ndef test_s1_bug_1_never_403(): pass\n', encoding="utf-8")
+        self.assertEqual(vp.validate(self.with_findings(), self.root, check_tests=True)[1], [])
+
+    def test_cli_review_flag(self):
+        must = self.root / "must-fix.json"
+        must.write_text(json.dumps([{"id": "EC-1"}, {"id": "EC-2"}]), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(PLUGIN / "skills" / "build-story" / "scripts" / "validate_plan.py"),
+                            "--root", str(self.root), "--review", str(must), str(self.with_findings())],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no row for EC-2", r.stderr)
+
+
 class RenderPlanReviewTest(unittest.TestCase):
     BUG = {"severity": "high", "title": "Undo restores at the end", "where": "Steps 3",
            "scenario": "delete the 2nd of 3 tasks, undo: it comes back last", "suggestion": "keep the index"}
@@ -190,6 +242,28 @@ class RenderPlanReviewTest(unittest.TestCase):
         self.assertIn("this plan PR is a draft", md)
         self.assertLess(md.index("Loses \\| data"), md.index("Minor"), "critical first, pipes escaped")
         self.assertIn("| Exactly 500 characters | only 501 is tested | add a 500 case |", md)
+
+    def test_must_fix_and_low(self):
+        data = {"edge_cases": [self.EDGE, {**self.EDGE, "case": "Empty list"}],
+                "bugs": [{**self.BUG, "severity": "low", "title": "Cosmetic"}, {**self.BUG, "severity": "critical", "title": "Data loss"},
+                         self.BUG]}
+        fix = rpr.must_fix(data)
+        self.assertEqual([(f["id"], f["kind"], f["severity"]) for f in fix],
+                         [("EC-1", "edge case", ""), ("EC-2", "edge case", ""), ("BUG-1", "bug", "critical"), ("BUG-2", "bug", "high")])
+        low = rpr.low_text(data)
+        self.assertIn("not required to fix", low)
+        self.assertIn("BUG-3 Cosmetic", low)
+        self.assertNotIn("Data loss", low)
+        self.assertEqual(rpr.low_text({"bugs": [self.BUG]}), "")
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "r.json"
+            src.write_text(json.dumps(data), encoding="utf-8")
+            subprocess.run([sys.executable, str(RPR), str(src), "--markdown", str(Path(d) / "m.md"),
+                            "--must-fix", str(Path(d) / "f.json"), "--low", str(Path(d) / "l.txt")], check=True, capture_output=True)
+            self.assertEqual(len(json.loads((Path(d) / "f.json").read_text(encoding="utf-8"))), 4)
+            md = (Path(d) / "m.md").read_text(encoding="utf-8")
+            self.assertIn("Must be fixed in this story (4):** EC-1, EC-2, BUG-1, BUG-2", md)
+            self.assertIn("| BUG-3 | ⚪ low | Cosmetic", md)
 
     def test_review_that_did_not_run(self):
         for content in (None, "not json", {"bugs": [{"severity": "medium"}]}, {"edge_cases": "x"}):

@@ -7,10 +7,17 @@ the product repo's story-check workflow. Standard library only.
 Usage (from the product repo root):
   validate_plan.py plans/foo-s1.md
   validate_plan.py --check-tests plans/foo-s1.md   # also: every AC has a test
+  validate_plan.py --review must-fix.json plans/foo-s1.md   # every plan-review finding is handled
 
 The plan must map every acceptance criterion of its story (in the spec) to a
 test named after "S<n> AC-<k>". --check-tests then looks for those names in
 the repo's test paths (`test_paths` in .sdlc/build.yaml, default tests/).
+
+The optional "Review findings" section lists the edge cases (EC-n) and
+critical or high bugs (BUG-n) the plan review found, how the plan handles
+each, and its test ("S<n> EC-1: ..."), which --check-tests also requires.
+--review names the IDs that must have a row; a row whose handling starts
+with "Decision needed" is a warning (the owner decides before it is built).
 
 Test names are matched in any language's style, case-insensitive:
 "S1 AC-2: ..." (Playwright, Jest, JUnit @DisplayName), test_s1_ac_2_...
@@ -21,6 +28,7 @@ Exit code 0 = valid (warnings allowed), 1 = at least one error.
 import argparse
 import datetime as dt
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -41,6 +49,9 @@ SECTIONS = ["Story", "Files", "Tests", "Steps", "Risks and rollback", "Out of sc
 MUST_BE_REAL = ["Story", "Files", "Tests", "Steps"]
 STORY_ID_RE = re.compile(r"^S\d+$")
 AC_ROW_RE = re.compile(r"^\|\s*AC-(\d+)\s*\|([^|]*)\|([^|]*)\|\s*$", re.MULTILINE)
+# Review findings rows: | EC-1 or BUG-2 | finding | how the plan handles it | test |
+FINDING_ROW_RE = re.compile(r"^\|\s*(EC|BUG)-(\d+)\s*\|([^|]*)\|([^|]*)\|([^|]*)\|\s*$", re.MULTILINE)
+DECISION_RE = re.compile(r"^\s*decision needed", re.IGNORECASE)
 FILE_ROW_RE = re.compile(r"^\|\s*([^|]+?)\s*\|([^|]*)\|\s*$", re.MULTILINE)
 TEST_SUFFIXES = {
     ".js", ".mjs", ".cjs", ".ts", ".mts", ".jsx", ".tsx", ".py", ".java", ".kt", ".kts", ".scala",
@@ -59,10 +70,10 @@ def test_paths(root):
     return [p.strip("/") + "/" for p in paths if p.strip("/")]
 
 
-def name_pattern(story_id, k):
-    """Regex for the test of AC-k in any naming style: 'S1 AC-2', 's1_ac_2', 'S1Ac2', 'S1-AC-2'."""
+def name_pattern(story_id, k, kind="AC"):
+    """Regex for the test of AC-k (or EC-k, BUG-k) in any naming style: 'S1 AC-2', 's1_ac_2', 'S1Ac2', 'S1-AC-2'."""
     n = story_id[1:]
-    return re.compile(rf"(?i)(?<![a-z0-9])s{n}[ _-]?ac[ _-]?{k}(?!\d)")
+    return re.compile(rf"(?i)(?<![a-z0-9])s{n}[ _-]?{kind.lower()}[ _-]?{k}(?!\d)")
 
 
 def story_criteria(spec_text, story_id):
@@ -113,13 +124,23 @@ def test_names_found(root, names):
     blob = "\n".join(texts)
     found = set()
     for n in names:
-        story, ac = n.split(" AC-")
-        if name_pattern(story, ac).search(blob):
+        story, ref = n.split(" ", 1)
+        kind, k = ref.split("-")
+        if name_pattern(story, k, kind).search(blob):
             found.add(n)
     return found
 
 
-def validate(path, root=".", check_tests=False):
+def review_findings(body):
+    """Rows of '## Review findings': {"EC-1": {"finding", "handling", "test"}} in order."""
+    _, sections = vi.split_sections(body)
+    return {f"{m.group(1)}-{m.group(2)}": {"finding": m.group(3).strip(), "handling": m.group(4).strip(),
+                                           "test": m.group(5).strip()}
+            for m in FINDING_ROW_RE.finditer(sections.get("Review findings", ""))}
+
+
+def validate(path, root=".", check_tests=False, must_fix=None):
+    """must_fix: IDs from the plan review (EC-n, BUG-n) that the plan must handle."""
     errors, warnings = [], []
     text = Path(path).read_text(encoding="utf-8")
     fm, body = vi.parse_frontmatter(text)
@@ -178,6 +199,8 @@ def validate(path, root=".", check_tests=False):
     expected = list(SECTIONS)
     if "Design" in order:
         expected.insert(expected.index("Story") + 1, "Design")
+    if "Review findings" in order:
+        expected.insert(expected.index("Tests") + 1, "Review findings")
     if "Edge cases" in order:
         expected.insert(expected.index("Tests") + 1, "Edge cases")
     else:
@@ -243,6 +266,33 @@ def validate(path, root=".", check_tests=False):
             for n in names:
                 if n not in found:
                     errors.append(f"no test titled \"{n}: ...\" found under tests/")
+
+    # Review findings: every must-fix edge case and critical or high bug from
+    # the plan review, how the plan handles it, and the test that proves it.
+    findings = review_findings(body)
+    for fid in must_fix or []:
+        if fid not in findings:
+            errors.append(f"Review findings has no row for {fid} from the plan review: every edge case and "
+                          "critical or high bug must be handled ('| ID | Finding | Handling | Test |')")
+    paths = test_paths(root)
+    to_find = []
+    for fid, row in findings.items():
+        kind, k = fid.split("-")
+        if not row["handling"]:
+            errors.append(f"{fid}: say how the plan handles it")
+        elif DECISION_RE.match(row["handling"]):
+            warnings.append(f"{fid} needs the owner's decision before it can be built: {row['handling'][:120]}")
+            continue
+        if not any(p in row["test"] for p in paths) or not (story and name_pattern(story, k, kind).search(row["test"])):
+            errors.append(f"{fid}: the Test column must name a test file under {' or '.join(paths)} and a test "
+                          f"for \"{story} {fid}\" (e.g. \"{story} {fid}: ...\")")
+        else:
+            to_find.append(f"{story} {fid}")
+    if check_tests and to_find:
+        found = test_names_found(root, to_find)
+        for n in to_find:
+            if n not in found:
+                errors.append(f"no test titled \"{n}: ...\" found under tests/ (a review finding the plan must fix)")
     return fm, errors, warnings
 
 
@@ -251,10 +301,14 @@ def main():
     ap.add_argument("files", nargs="+")
     ap.add_argument("--check-tests", action="store_true", help="also require every AC's test to exist under tests/")
     ap.add_argument("--root", default=".", help="product repo root (default: current dir)")
+    ap.add_argument("--review", help="must-fix JSON from render_plan_review.py: every ID needs a Review findings row")
     args = ap.parse_args()
+    must_fix = None
+    if args.review:
+        must_fix = [i["id"] for i in json.loads(Path(args.review).read_text(encoding="utf-8"))]
     failed = False
     for f in args.files:
-        _, errors, warnings = validate(f, args.root, args.check_tests)
+        _, errors, warnings = validate(f, args.root, args.check_tests, must_fix)
         for w in warnings:
             print(f"::warning file={f}::{w}", file=sys.stderr)
         for e in errors:

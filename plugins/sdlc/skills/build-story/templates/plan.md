@@ -37,6 +37,15 @@ left by earlier stories. Say how each is handled and where it is tested:
 "- 501-character task: rejected with the length message (tests/unit/add.test.ts › "S3 AC-2: ...")".
 A case that is deliberately not handled says why.>
 
+## Review findings
+<Only when the plan review (sdlc:review-plan) found something: one row per
+must-fix finding, every edge case (EC-n) and every critical or high bug
+(BUG-n). Low bugs are not listed; they go to the Jira story. Delete this
+section otherwise.>
+| ID | Finding | Handling | Test |
+|---|---|---|---|
+| <EC-1> | <the finding, in a few words> | <how the plan now handles it: which step or file> | <test file › "S<n> EC-1: <name>"> |
+
 ## Steps
 1. <Write the failing tests for AC-1..n.>
 2. <Implement in the smallest steps that turn them green.>

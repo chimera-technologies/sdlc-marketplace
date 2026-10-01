@@ -35,6 +35,11 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
    confirm it checks the behaviour the criterion describes, not something
    weaker (for example, a test that only checks a button exists does not
    prove "the count updates on every tick").
+3b. **Every review finding is fixed**: for each row of the plan's
+   `## Review findings` (edge cases EC-n, critical or high bugs BUG-n from the
+   plan review), confirm the code does what the Handling column says and
+   that its `S<n> <id>` test reproduces the scenario and passes. An unfixed
+   or untested finding is a high finding.
 4. **Repo rules** from `CLAUDE.md`: stack limits (no new dependencies,
    CDNs or frameworks if forbidden), required patterns (such as rendering
    user text with `textContent`), and file layout.
@@ -60,10 +65,11 @@ VERDICT: PASS | FAIL
 | AC | Test | Result | Note |
 |---|---|---|---|
 | AC-1 | <test file> › S1 AC-1: ... | pass | |
+| EC-1 | <test file> › S1 EC-1: ... | pass | (one row per Review finding) |
 Findings:
 - [high|medium|low] <file:line> <what is wrong> -> <what to change>
 Tests: <n passed, m failed> (full suite)
 ```
 
-FAIL if any test fails, any AC is untested or weakly tested, or there is a
-high finding. Do not approve anything; the owner reviews the PR.
+FAIL if any test fails, any AC or review finding is untested or weakly
+tested, or there is a high finding. Do not approve anything; the owner reviews the PR.
