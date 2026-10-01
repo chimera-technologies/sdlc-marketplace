@@ -216,6 +216,8 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # sdlc-bot App token: comments post as the bot, and no OIDC exchange is needed.
           github_token: ${{ steps.app.outputs.token }}
+          # Automatic Build opens story PRs as sdlc-bot; allow that bot, and only that one.
+          allowed_bots: ${{ steps.app.outputs.app-slug }}
           plugin_marketplaces: ${{ matrix.reviewer.marketplace || '' }}
           plugins: ${{ matrix.reviewer.plugin || '' }}
           prompt: ${{ matrix.reviewer.prompt }}
