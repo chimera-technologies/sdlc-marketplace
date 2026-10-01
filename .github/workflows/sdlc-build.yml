@@ -14,6 +14,9 @@ name: "SDLC Build: plan and build stories"
 #            is incomplete); PR review and Test then run as for any story PR.
 # Merging the story PR starts the next story. One story per spec in flight,
 # so stories build in order and never conflict.
+# Jira (when the story has a key): a comment when the plan PR opens; In
+# Progress when the build starts; a comment and In Review when the story PR
+# opens (sdlc-story-link moves it to Done on merge). Never blocks the loop.
 #
 # Claude holds no GitHub or Jira token: checkouts do not persist
 # credentials, and the App token is only used by the PR steps.
@@ -263,6 +266,7 @@ jobs:
           retention-days: 90
 
       - name: Open the plan PR
+        id: pr
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ steps.app.outputs.token }}
@@ -278,6 +282,16 @@ jobs:
           draft: ${{ steps.check.outputs.valid == 'false' }}
           labels: plan
           reviewers: ${{ steps.check.outputs.reviewer }}
+
+      - name: Tell the Jira story (plan ready)
+        if: steps.jira.outputs.key != 'none' && steps.pr.outputs.pull-request-url != ''
+        continue-on-error: true   # Jira never blocks the loop
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          KEY: ${{ steps.jira.outputs.key }}
+          URL: ${{ steps.pr.outputs.pull-request-url }}
+        run: |
+          python3 "$SCRIPTS/jira_story.py" "$KEY" comment "Plan ready for review: $URL. Merging it approves the plan and starts the build."
 
   build:
     needs: next
@@ -360,6 +374,18 @@ jobs:
           set -euo pipefail
           [[ "$BRANCH" =~ ^story/[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "::error::plan branch $BRANCH is not story/<name>"; exit 1; }
           git checkout -b "$BRANCH"
+
+      - name: Move the Jira story to In Progress
+        id: jira
+        continue-on-error: true   # Jira never blocks the loop
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          key=$(sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$PLAN" | head -n1)
+          echo "key=${key:-none}" >> "$GITHUB_OUTPUT"
+          [ -n "$key" ] || { echo "No Jira key in $PLAN; skipping."; exit 0; }
+          python3 "$SCRIPTS/jira_story.py" "$key" move in-progress
+          python3 "$SCRIPTS/jira_story.py" "$key" comment "Build started on $BRANCH from the approved plan $PLAN. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
       - name: Preflight (Graphify, Ponytail)
         run: |
@@ -459,6 +485,7 @@ jobs:
           exit 1
 
       - name: Open the story PR
+        id: pr
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ steps.app.outputs.token }}
@@ -473,3 +500,19 @@ jobs:
           draft: ${{ steps.check.outputs.result != 'PASS' }}
           labels: story
           reviewers: ${{ steps.check.outputs.reviewer }}
+
+      - name: Tell the Jira story (story PR open)
+        if: steps.jira.outputs.key != 'none' && steps.jira.outputs.key != '' && steps.pr.outputs.pull-request-url != ''
+        continue-on-error: true   # Jira never blocks the loop
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          KEY: ${{ steps.jira.outputs.key }}
+          URL: ${{ steps.pr.outputs.pull-request-url }}
+          RESULT: ${{ steps.check.outputs.result }}
+        run: |
+          if [ "$RESULT" = "PASS" ]; then
+            python3 "$SCRIPTS/jira_story.py" "$KEY" comment "Story PR ready for review: $URL. Build PASS: acceptance tests green, verifier PASS. Merging it moves this story to Done."
+            python3 "$SCRIPTS/jira_story.py" "$KEY" move in-review
+          else
+            python3 "$SCRIPTS/jira_story.py" "$KEY" comment "Build incomplete; draft story PR with the report: $URL. Someone needs to finish it (see the PR)."
+          fi
