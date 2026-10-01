@@ -144,7 +144,7 @@ jobs:
             --model "$MODEL" \
             --max-turns 40 \
             --strict-mcp-config \
-            --allowedTools "Read,Glob,Grep,Write,Bash(git diff*),Bash(git log*),Bash(git show*)" \
+            --allowedTools "Read,Glob,Grep,Write,Bash(git diff*),Bash(git log*),Bash(git show*),Workflow,ToolSearch" \
             --output-format stream-json --verbose \
             > "$RUNNER_TEMP/review-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)"' || true

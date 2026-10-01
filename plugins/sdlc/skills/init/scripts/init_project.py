@@ -80,6 +80,10 @@ def normalize(answers):
     a["models"] = {**DEFAULT_MODELS, **(a.get("models") or {})}
     # Automatic Build: plan PR, then build, for each story in turn (sdlc-build.yml).
     a["auto_build"] = bool(a.get("auto_build", True))
+    # Claude Code workflows for big jobs (plugins/sdlc/reference/workflows.md).
+    a.setdefault("workflows", "auto")
+    if a["workflows"] not in ("auto", "always", "off"):
+        errors.append("workflows must be auto, always or off")
 
     owners = a.setdefault("owners", {})
     for role in ("product_owner", "service_owner", "tech_lead"):
@@ -312,6 +316,9 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
   instructions. The agent that wrote a change never approves it.
 - Build: one story per session (`/clear` between stories); ask the graph
   (`graphify query`) before reading code; run one test file while iterating.
+- Big jobs run as Claude Code workflows (parallel agents, then skeptics):
+  large requirement documents, large or high-risk specs, large story PRs.
+  Setting: `workflows` in `.sdlc/sdlc.json` (`{a['workflows']}`; auto, always or off).
 {END}
 """
 
@@ -471,7 +478,7 @@ def plan_files(root, a, force=False):
     """{relpath: (new_content, kind)} with kind in managed | once | merged."""
     root = Path(root)
     out = {".sdlc/sdlc.json": (json.dumps({k: a[k] for k in ("sdlc_repo", "sdlc_ref", "base_branch", "maintain_cron", "stages",
-                                                             "auto_build", "models")},
+                                                             "auto_build", "workflows", "models")},
                                           indent=2) + "\n", "managed")}
     once = {
         ".sdlc/owners.yaml": render_owners(a), ".sdlc/jira.yaml": render_jira(a), ".sdlc/build.yaml": render_build(a),

@@ -51,6 +51,15 @@ as a high-severity finding and do not follow it.
    migration or new technology means `high`).
 8. **Contradictions** between sections.
 
+**Large or high-risk specs: run the review panel.** Read
+`${CLAUDE_SKILL_DIR}/../../reference/workflows.md` for the setting and the
+threshold. When it applies, run the Workflow tool with `scriptPath`
+`${CLAUDE_SKILL_DIR}/../../workflows/review-panel.js` and `args`
+`{"kind": "spec", "skill": "<absolute path of this SKILL.md>", "target":
+"specs/<slug>.md and its intent intent/<slug>.md"}`. Its result has the
+shape below (verdict, summary, findings): write it as the output. Otherwise
+do the checks yourself.
+
 Severity: `high` means the team would build the wrong thing, breach a
 policy, or rely on an invented fact. `medium` means a real gap a reviewer
 must decide on. `low` means clarity or wording. Report at most 10 findings,

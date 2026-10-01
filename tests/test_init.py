@@ -169,6 +169,13 @@ class InitTest(unittest.TestCase):
         self.assertTrue(json.loads(self.read(".sdlc/sdlc.json"))["auto_build"])
         self.assertIn("a plan PR, then the build", self.read("CLAUDE.md"))
 
+    def test_workflows_setting(self):
+        self.run_init()
+        self.assertEqual(json.loads(self.read(".sdlc/sdlc.json"))["workflows"], "auto")
+        self.assertIn("Claude Code workflows", self.read("CLAUDE.md"))
+        _, errors = ip.normalize({**ANSWERS, "workflows": "sometimes"})
+        self.assertIn("workflows must be auto, always or off", errors)
+
     def test_auto_build_off(self):
         self.run_init({**ANSWERS, "auto_build": False})
         push = self.read(".github/workflows/sdlc-push.yml")

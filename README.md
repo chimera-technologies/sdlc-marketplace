@@ -25,6 +25,14 @@ Adopt it in a project in one command, **`/sdlc:init`**, then follow
 Details: [docs/stages.md](docs/stages.md). Configuration:
 [docs/configuration.md](docs/configuration.md).
 
+## Big jobs: Claude Code workflows
+
+Large requirement documents, large or high-risk specs and large story PRs
+are handled by Claude Code workflows: several agents in parallel, then
+skeptics that try to refute the results, and (for documents) a critic that
+lists requirements no intent covers. Small inputs stay in one session. See
+[plugins/sdlc/reference/workflows.md](plugins/sdlc/reference/workflows.md).
+
 ## Any tech stack
 
 Nothing is tied to a language. The spec's tech lead decides the stack;
@@ -59,6 +67,8 @@ plugins/sdlc/
                  review-story, release, triage, security-policy
                  (each: SKILL.md + templates/, scripts/, examples/, reference/)
   agents/        verifier (Build)
+  workflows/     Claude Code workflows for big jobs: requirements-to-intents, review-panel
+  reference/     workflows.md: when each workflow runs (thresholds, auto/always/off)
   hooks/         headless write guard, build guard, intent/spec validation on write
 .github/workflows/
   sdlc-*.yml     reusable workflows the projects call

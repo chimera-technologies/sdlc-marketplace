@@ -4,6 +4,34 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.10.0 (2026-10-01)
+
+Big jobs run as Claude Code workflows (the Workflow tool): parallel agents,
+then adversarial checks.
+
+- **`requirements-to-intents.js`** (`write-intent`, large documents): one
+  reader per document section extracts outcomes and requirements; they are
+  grouped into intents (the person confirms the split); one writer per
+  intent; two skeptics per draft (faithful to the document, follows the
+  skill rules) and a fix pass; a completeness critic lists requirements no
+  intent covers.
+- **`review-panel.js`** (`review-spec`, `review-story`, large or high-risk):
+  four reviewers in parallel, one per lens; every high and medium finding
+  must survive two skeptics trying to refute it (a tie refutes); duplicates
+  merged; same JSON output as before, so the gates are unchanged.
+- **When**: `plugins/sdlc/reference/workflows.md` sets the thresholds;
+  `.sdlc/sdlc.json` `workflows: auto | always | off` (default `auto`).
+  Below the threshold, or where the Workflow tool is unavailable, the skill
+  works in one session as before.
+- CI: the `review-spec` and `review-story` steps may use the Workflow tool
+  (it runs in headless `claude -p`).
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.10.0` adds `"workflows": "auto"` to
+  `.sdlc/sdlc.json`. Set `"off"` to keep single sessions everywhere.
+- Expect higher cost on large PRs and specs (several agents instead of one).
+
 ## v0.9.2 (2026-10-01)
 
 - Automatic Build: the preflight no longer runs Graphify's Claude Code

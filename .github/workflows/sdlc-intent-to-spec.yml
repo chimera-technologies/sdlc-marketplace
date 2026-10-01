@@ -234,12 +234,13 @@ jobs:
         run: |
           set -euo pipefail
           # Fresh Claude session: it sees only the files, not the author's reasoning.
+          # Large or high-risk specs: the skill runs a review panel (Claude Code workflow).
           claude -p "/sdlc:review-spec mode=headless spec=specs/$SLUG.md" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
             --max-turns 40 \
             --strict-mcp-config \
-            --allowedTools "Read,Glob,Grep,Write" \
+            --allowedTools "Read,Glob,Grep,Write,Workflow,ToolSearch" \
             --output-format stream-json --verbose \
             > "$RUNNER_TEMP/review-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
