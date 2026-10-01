@@ -2,6 +2,7 @@
 Maintain stage (run_checks)."""
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -202,12 +203,14 @@ class InfraDeployConfigTest(unittest.TestCase):
 
     def test_deploys_output(self):
         script = SKILLS / "release" / "scripts" / "deploy_config.py"
+        # In CI, GITHUB_OUTPUT is set and the script writes there; make it print instead.
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_OUTPUT"}
         with tempfile.TemporaryDirectory() as d:
             self.write(d, "iac: terraform\n")
-            r = subprocess.run([sys.executable, str(script), "--root", d], capture_output=True, text=True)
+            r = subprocess.run([sys.executable, str(script), "--root", d], capture_output=True, text=True, env=env)
             self.assertIn("deploys=true", r.stdout)
             self.write(d, "cloud: oracle\n")
-            r = subprocess.run([sys.executable, str(script), "--root", d], capture_output=True, text=True)
+            r = subprocess.run([sys.executable, str(script), "--root", d], capture_output=True, text=True, env=env)
             self.assertEqual(r.returncode, 1)
 
     def test_init_render_and_record(self):
