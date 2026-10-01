@@ -419,6 +419,18 @@ class PreflightNoCodeTest(unittest.TestCase):
         self.assertTrue(bg.no_code_marker(self.root).is_file())
         self.assertFalse(any("extract" in c for c in self.calls), "must not try to index nothing")
 
+    def test_headless_does_not_touch_claude_md(self):
+        (self.root / "src").mkdir()
+        (self.root / "src" / "main.ts").write_text("export {}\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"SDLC_HEADLESS": "1"}):
+            report = self.graphify()
+        self.assertFalse(any("claude" in c and "install" in c for c in self.calls), self.calls)
+        self.assertIn("graphify: Claude Code integration skipped (headless)", report)
+        self.assertTrue((self.root / "graphify-out" / "graph.json").is_file(), "the graph is still built")
+        with mock.patch.dict(os.environ, {"SDLC_HEADLESS": "0"}):
+            self.graphify()
+        self.assertTrue(any("claude" in c and "install" in c for c in self.calls), "interactive still installs it")
+
     def test_graph_replaces_the_marker_once_code_exists(self):
         self.graphify()
         (self.root / "src").mkdir()
