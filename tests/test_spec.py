@@ -180,6 +180,50 @@ class SpecStoriesTest(unittest.TestCase):
         self.assertEqual(result["created"], [])
         self.assertEqual(jira.calls, [])
 
+    def no_record_spec(self, d):
+        p = Path(d) / "claims-status-self-service.md"
+        p.write_text(SPEC.read_text(encoding="utf-8").replace("record_id: CLM-482", "record_id: none"), encoding="utf-8")
+        return p
+
+    CFG = {"enabled": "true", "space_key": "ACM", "epic_issue_type": "Epic", "created_label": "intent-created"}
+
+    def test_no_record_creates_the_epic_then_stories(self):
+        with tempfile.TemporaryDirectory() as d:
+            jira = FakeJira()
+            result = ss.create_stories(self.no_record_spec(d), jira, "Story", self.CFG)
+        epic = jira.calls[0][2]["fields"]
+        self.assertEqual(epic["project"], {"key": "ACM"})
+        self.assertEqual(epic["issuetype"], {"name": "Epic"})
+        self.assertEqual(epic["summary"], "Let customers check claim status themselves")
+        self.assertEqual(epic["labels"], ["from-spec", "spec-claims-status-self-service", "intent-created"])
+        self.assertTrue(result["epic_created"])
+        self.assertEqual(result["record"], "CLM-101")
+        stories = [b["fields"] for _, p, b in jira.calls[1:] if p == "/rest/api/2/issue"]
+        self.assertEqual(len(stories), 3)
+        self.assertTrue(all(s["parent"] == {"key": "CLM-101"} and s["project"] == {"key": "ACM"} for s in stories))
+
+    def test_rerun_reuses_the_epic(self):
+        with tempfile.TemporaryDirectory() as d:
+            jira = FakeJira(existing={"spec-claims-status-self-service"})
+            result = ss.create_stories(self.no_record_spec(d), jira, "Story", self.CFG)
+        self.assertFalse(result["epic_created"])
+        self.assertEqual(result["record"], "CLM-1")
+        self.assertEqual(len([1 for _, p, _ in jira.calls if p == "/rest/api/2/issue"]), 3, "stories only, no second Epic")
+
+    def test_jira_off_creates_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            for cfg in ({"enabled": "false", "space_key": "ACM"}, {"enabled": "true"}, {}):
+                jira = FakeJira()
+                self.assertIsNone(ss.create_stories(self.no_record_spec(d), jira, "Story", cfg)["record"])
+                self.assertEqual(jira.calls, [])
+
+    def test_load_jira_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "jira.yaml"
+            p.write_text("# c\nenabled: true\nspace_key: ACM   # the space\ncreated_label: \"intent-created\"\n", encoding="utf-8")
+            self.assertEqual(ss.load_jira_config(p), {"enabled": "true", "space_key": "ACM", "created_label": "intent-created"})
+            self.assertEqual(ss.load_jira_config(Path(d) / "missing.yaml"), {})
+
 
 class RenderReviewTest(unittest.TestCase):
     def render(self, content):

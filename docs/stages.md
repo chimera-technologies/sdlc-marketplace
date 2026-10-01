@@ -35,7 +35,12 @@ Jira ticket / document / breach
   outcome. Headless runs can write only `intent/` (hook).
 - **Design**: every intent open question carried into the spec; the stack
   decided in "Technology and architecture"; an adversarial pre-screen in a
-  fresh session; stories created only from a merged, valid spec.
+  fresh session; stories created only from a merged, valid spec. With Jira
+  on, every accepted spec gets an Epic: the intent's ticket (from Jira
+  intake, or created by `/sdlc:write-intent` in Plan), else one created when
+  the spec merges (labelled `spec-<slug>`, found again on re-runs), and one
+  Story per `S<n>` under it. Automatic Build then finds each story's key by
+  its `spec-<slug>-s<n>` label and names the branch after it.
 - **UI design**: made with every spec, no accounts needed: one static HTML
   mockup per screen, rendered to PNG by headless Chrome with scripts and
   network blocked. Every spec story on a screen or listed as "No UI"; one

@@ -39,6 +39,9 @@ Arguments: `$ARGUMENTS`
    - Owners (GitHub handles or `@org/team`): product owner, service owner,
      tech lead, security owner (default: the tech lead).
    - Jira: yes or no; if yes, the site (`<name>.atlassian.net`) and space key.
+     With Jira on, every accepted spec gets an Epic and one Story per spec
+     story automatically (when the spec merges), whether or not the intent
+     came from a Jira ticket.
    - Stages to enable (default all): plan, design, ui_design, build,
      pr_review, test, deploy, maintain.
    - Automatic Build (default yes): each story gets a plan PR, and merging
@@ -52,7 +55,7 @@ Arguments: `$ARGUMENTS`
 3. **Write the answers** to `.sdlc-output/init-answers.json`:
 
    ```json
-   {"sdlc_ref": "v0.8.2", "base_branch": "main",
+   {"sdlc_ref": "v0.9.0", "base_branch": "main",
     "owners": {"product_owner": "@po", "service_owner": "@org/sre", "tech_lead": "@lead", "security_owner": "@lead"},
     "jira": {"enabled": true, "site": "acme.atlassian.net", "space_key": "ACM"},
     "stages": {"ui_design": false}, "auto_build": true,
