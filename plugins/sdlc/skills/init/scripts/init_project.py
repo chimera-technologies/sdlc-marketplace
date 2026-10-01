@@ -283,7 +283,7 @@ def render_claude_block(a):
     if s["ui_design"]:
         rows.append("| UI design | automatic with the spec (HTML mockups); `/sdlc:design-ui` to redo them or refine them in Figma | `designs/<slug>/` | owner merges the spec PR (or a design PR) |")
     if s["build"] and a["auto_build"]:
-        rows.append("| Build | automatic, one story at a time: a plan PR, then the build when it merges "
+        rows.append("| Build | automatic, one story at a time: a plan PR (reviewed for edge cases and bugs), then the build when it merges "
                     "(`/sdlc:build-story <KEY>` to build by hand) | `plans/<slug>-s<n>.md`, then code and tests "
                     "in the story PR | owner merges the plan PR; verifier PASS |")
     elif s["build"]:

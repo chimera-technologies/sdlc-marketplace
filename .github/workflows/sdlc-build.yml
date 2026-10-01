@@ -222,12 +222,32 @@ jobs:
           tail -n1 "$RUNNER_TEMP/plan-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
           [ -s "plans/$ID.md" ] || { echo "::error::Claude did not write plans/$ID.md"; exit 1; }
 
+      - name: Review the plan for edge cases and bugs (review-plan, headless)
+        continue-on-error: true   # a failed review shows as "did not run" in the PR, never blocks it
+        env:
+          SDLC_WRITE_ALLOW: ".sdlc-output/plan-review.json"
+        run: |
+          set -euo pipefail
+          # Fresh session: the reviewer is not the author. Large or high-risk plans get the review panel workflow.
+          claude -p "/sdlc:review-plan mode=headless plan=plans/$ID.md" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --model "$MODEL" \
+            --max-turns 40 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Bash(graphify *),Bash(python3 -m graphify *),Workflow,ToolSearch" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/plan-review-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/plan-review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
       - name: Validate the plan and build the PR body
         id: check
         run: |
           set -euo pipefail
           if python3 "$SCRIPTS/validate_plan.py" "plans/$ID.md" 2> "$RUNNER_TEMP/validation.txt"; then valid=true; else valid=false; fi
           cat "$RUNNER_TEMP/validation.txt"
+          review=$(python3 "$PLUGIN_DIR/skills/review-plan/scripts/render_plan_review.py" .sdlc-output/plan-review.json \
+                   --markdown "$RUNNER_TEMP/plan-review.md")
+          echo "Plan review: $review"
           python3 "$VALIDATE_SPEC" --json "$SPEC" > "$RUNNER_TEMP/spec.json" 2>/dev/null || echo '{}' > "$RUNNER_TEMP/spec.json"
           owner=$(jq -r '.owner // ""' "$RUNNER_TEMP/spec.json")
           branch=$(sed -n 's/^branch:[[:space:]]*//p' "plans/$ID.md" | head -n1)
@@ -240,28 +260,36 @@ jobs:
               echo "> [!WARNING]"; echo "> Validation failed; opened as draft. Fix before merging:"
               echo '```'; cat "$RUNNER_TEMP/validation.txt"; echo '```'; echo
             fi
+            cat "$RUNNER_TEMP/plan-review.md"; echo
             echo "### Review checklist"
             echo "- [ ] Every acceptance criterion has a test, in order"
+            echo "- [ ] The Edge cases section covers what this story must handle; accepted review findings are added to the plan"
+            echo "- [ ] No critical or high bug from the plan review is left unaddressed"
             echo "- [ ] The files and steps are the smallest change that meets the story"
             echo "- [ ] The Design section names this story's screens (if it has any)"
             echo "- [ ] Decisions to confirm (Risks and rollback) are answered"
             echo
             echo "<details><summary>Evidence</summary>"
             echo
-            echo "- Skill: sdlc:build-story mode=plan @ \`${{ inputs.sdlc_repo }}@${{ inputs.sdlc_ref }}\`"
+            echo "- Skills: sdlc:build-story mode=plan, sdlc:review-plan @ \`${{ inputs.sdlc_repo }}@${{ inputs.sdlc_ref }}\`"
             echo "- Model: $MODEL"
             echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (transcript artifact)"
             echo "</details>"
           } > "$RUNNER_TEMP/pr-body.md"
           reviewer=${owner#@}; [[ "$reviewer" == */* ]] && reviewer=""   # teams are routed by CODEOWNERS, not here
-          { echo "valid=$valid"; echo "reviewer=$reviewer"; } >> "$GITHUB_OUTPUT"
+          # A critical bug makes the plan PR a draft, like an invalid plan.
+          draft=false; if [ "$valid" = "false" ] || [ "$review" = "blocking" ]; then draft=true; fi
+          { echo "valid=$valid"; echo "draft=$draft"; echo "review=$review"; echo "reviewer=$reviewer"; } >> "$GITHUB_OUTPUT"
 
       - name: Upload transcript (evidence)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: plan-transcript-${{ matrix.item.id }}
-          path: ${{ runner.temp }}/plan-transcript.jsonl
+          path: |
+            ${{ runner.temp }}/plan-transcript.jsonl
+            ${{ runner.temp }}/plan-review-transcript.jsonl
+            .sdlc-output/plan-review.json
           if-no-files-found: ignore
           retention-days: 90
 
@@ -279,8 +307,10 @@ jobs:
             From ${{ matrix.item.spec }} @ ${{ github.sha }}
           title: "plan: ${{ matrix.item.story }} ${{ matrix.item.title }}"
           body-path: ${{ runner.temp }}/pr-body.md
-          draft: ${{ steps.check.outputs.valid == 'false' }}
-          labels: plan
+          draft: ${{ steps.check.outputs.draft == 'true' }}
+          labels: |
+            plan
+            plan-review:${{ steps.check.outputs.review }}
           reviewers: ${{ steps.check.outputs.reviewer }}
 
       - name: Tell the Jira story (plan ready)

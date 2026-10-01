@@ -28,6 +28,8 @@ bg = load("build_guard", PLUGIN / "hooks" / "build_guard.py")
 bp = load("build_preflight", PLUGIN / "skills" / "build-story" / "scripts" / "build_preflight.py")
 ns = load("next_story", PLUGIN / "skills" / "build-story" / "scripts" / "next_story.py")
 js = load("jira_story", PLUGIN / "skills" / "build-story" / "scripts" / "jira_story.py")
+RPR = PLUGIN / "skills" / "review-plan" / "scripts" / "render_plan_review.py"
+rpr = load("render_plan_review", RPR)
 
 TEST_FILE = '''
 test("S1 AC-1: only the customer's own claims", () => {});
@@ -79,7 +81,7 @@ class ValidatePlanTest(Repo):
 
     def test_extra_row_not_in_spec(self):
         text = self.plan_text.replace(
-            "\n## Steps", '| AC-4 | Made up. | tests/api/x.py › "S1 AC-4: x" |\n\n## Steps')
+            "\n## Edge cases", '| AC-4 | Made up. | tests/api/x.py › "S1 AC-4: x" |\n\n## Edge cases')
         _, errors, _ = vp.validate(self.plan(text), self.root)
         self.assertError(errors, "not in the spec ['AC-4']")
 
@@ -137,6 +139,63 @@ class ValidatePlanTest(Repo):
     def test_check_tests_does_not_match_longer_ids(self):
         (self.root / "tests" / "api" / "t.py").write_text('test("S1 AC-10: x")\ntest("S1 AC-20: y")\ntest("S1 AC-30: z")', encoding="utf-8")
         self.assertEqual(vp.test_names_found(self.root, ["S1 AC-1", "S1 AC-2", "S1 AC-3"]), set())
+
+
+class PlanEdgeCasesTest(Repo):
+    def test_example_has_edge_cases(self):
+        _, errors, warnings = vp.validate(self.plan(), self.root)
+        self.assertEqual((errors, warnings), ([], []))
+
+    def test_missing_section_only_warns(self):
+        start, end = self.plan_text.index("## Edge cases"), self.plan_text.index("## Steps")
+        _, errors, warnings = vp.validate(self.plan(self.plan_text[:start] + self.plan_text[end:]), self.root)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("Edge cases" in w for w in warnings), warnings)
+
+    def test_section_must_be_real_and_after_tests(self):
+        start, end = self.plan_text.index("## Edge cases"), self.plan_text.index("## Steps")
+        empty = self.plan_text[:start] + "## Edge cases\nTBD\n\n" + self.plan_text[end:]
+        self.assertError(vp.validate(self.plan(empty), self.root)[1], "'Edge cases' needs real content")
+        section = self.plan_text[start:end]
+        moved = (self.plan_text[:start] + self.plan_text[end:]).replace("## Out of scope", section + "## Out of scope")
+        self.assertError(vp.validate(self.plan(moved), self.root)[1], "section headings must be exactly")
+
+
+class RenderPlanReviewTest(unittest.TestCase):
+    BUG = {"severity": "high", "title": "Undo restores at the end", "where": "Steps 3",
+           "scenario": "delete the 2nd of 3 tasks, undo: it comes back last", "suggestion": "keep the index"}
+    EDGE = {"case": "Exactly 500 characters", "why": "only 501 is tested", "suggestion": "add a 500 case"}
+
+    def run_render(self, content):
+        with tempfile.TemporaryDirectory() as d:
+            src, md = Path(d) / "plan-review.json", Path(d) / "out.md"
+            if content is not None:
+                src.write_text(content if isinstance(content, str) else json.dumps(content), encoding="utf-8")
+            r = subprocess.run([sys.executable, str(RPR), str(src), "--markdown", str(md)], capture_output=True, text=True)
+            return r.returncode, r.stdout.strip(), md.read_text(encoding="utf-8")
+
+    def test_verdicts(self):
+        self.assertEqual(rpr.verdict({"edge_cases": [], "bugs": []}), "clean")
+        self.assertEqual(rpr.verdict({"edge_cases": [], "bugs": [{**self.BUG, "severity": "low"}]}), "clean")
+        self.assertEqual(rpr.verdict({"edge_cases": [self.EDGE], "bugs": []}), "concerns")
+        self.assertEqual(rpr.verdict({"edge_cases": [], "bugs": [self.BUG]}), "concerns")
+        self.assertEqual(rpr.verdict({"bugs": [self.BUG, {**self.BUG, "severity": "critical"}]}), "blocking")
+
+    def test_markdown_lists_both_by_severity(self):
+        data = {"summary": "Two gaps.", "edge_cases": [self.EDGE],
+                "bugs": [{**self.BUG, "severity": "low", "title": "Minor"}, {**self.BUG, "severity": "critical", "title": "Loses | data"}]}
+        code, verdict, md = self.run_render(data)
+        self.assertEqual((code, verdict), (0, "blocking"))
+        self.assertIn("Potential bugs: 1 critical · 0 high · 1 low. Missed edge cases: 1.", md)
+        self.assertIn("this plan PR is a draft", md)
+        self.assertLess(md.index("Loses \\| data"), md.index("Minor"), "critical first, pipes escaped")
+        self.assertIn("| Exactly 500 characters | only 501 is tested | add a 500 case |", md)
+
+    def test_review_that_did_not_run(self):
+        for content in (None, "not json", {"bugs": [{"severity": "medium"}]}, {"edge_cases": "x"}):
+            code, verdict, md = self.run_render(content)
+            self.assertEqual((code, verdict), (0, "failed"), content)
+            self.assertIn("did not run", md)
 
 
 class PlanWithoutJiraTest(Repo):

@@ -167,7 +167,7 @@ class InitTest(unittest.TestCase):
         self.assertIn("inputs.rerun == 'build'", push)
         self.assertIn("options: [intent-to-spec, spec-to-stories, build, release]", push)
         self.assertTrue(json.loads(self.read(".sdlc/sdlc.json"))["auto_build"])
-        self.assertIn("a plan PR, then the build", self.read("CLAUDE.md"))
+        self.assertIn("a plan PR (reviewed for edge cases and bugs), then the build", self.read("CLAUDE.md"))
 
     def test_workflows_setting(self):
         self.run_init()

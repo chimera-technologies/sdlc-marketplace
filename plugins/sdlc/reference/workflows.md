@@ -21,6 +21,7 @@ A missing key means `auto`.
 |---|---|---|
 | `write-intent` | `requirements-to-intents.js` | the source document is over ~3,000 words, or has more than 8 top-level sections, or Step 1b finds 3 or more intents |
 | `review-spec` | `review-panel.js` (`kind: spec`) | the spec has 5 or more stories, or is over ~2,500 words, or its `risk` is `high` |
+| `review-plan` | `review-panel.js` (`kind: plan`) | the spec's `risk` is `high`, or the plan's Files table has more than 8 rows, or the story has design screens and changes existing code |
 | `review-story` | `review-panel.js` (`kind: story`) | the diff (`git diff --stat <base>...HEAD`) changes more than 400 lines or 12 files, or the spec's `risk` is `high` |
 
 Below the threshold, the skill works in one session as written: the extra

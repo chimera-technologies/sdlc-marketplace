@@ -4,6 +4,30 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.11.0 (2026-10-01)
+
+Every plan is checked for missed edge cases and potential bugs before it is
+approved.
+
+- **Plans get an `## Edge cases` section** (after Tests): each case, how it
+  is handled, and the test or step that covers it. `build-story` always
+  writes it, so the build implements it. The validator warns (does not fail)
+  on older plans without it.
+- **New `sdlc:review-plan` skill**: a fresh reviewer (never the author)
+  reports missed edge cases and potential bugs rated **critical / high /
+  low**, each with a concrete scenario. Large or high-risk plans use the
+  review panel workflow (`review-panel.js` `kind: plan`: inputs, failures,
+  correctness, regressions-security lenses; skeptics per finding).
+- **Plan PRs** (`sdlc-build.yml`) show the review (`render_plan_review.py`):
+  a critical bug opens the plan PR as a draft; labels
+  `plan-review:clean|concerns|blocking|failed`. Interactive `build-story`
+  runs the review before showing the plan.
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.11.0`. Nothing to configure. Plans approved before
+  the upgrade keep working (the Edge cases section is optional for them).
+
 ## v0.10.0 (2026-10-01)
 
 Big jobs run as Claude Code workflows (the Workflow tool): parallel agents,

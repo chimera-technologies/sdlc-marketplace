@@ -172,7 +172,18 @@ def validate(path, root=".", check_tests=False):
         errors.append("missing H1 '# Plan: S<n> <story title>'")
     order, sections = vi.split_sections(body)
     # "Design" is optional, right after "Story"; it is required when the story has screens.
-    expected = SECTIONS[:1] + ["Design"] + SECTIONS[1:] if "Design" in order else SECTIONS
+    # Optional sections: "Design" right after "Story" (required when the story has
+    # screens), "Edge cases" right after "Tests" (written by build-story for every
+    # new plan; older plans without it only warn).
+    expected = list(SECTIONS)
+    if "Design" in order:
+        expected.insert(expected.index("Story") + 1, "Design")
+    if "Edge cases" in order:
+        expected.insert(expected.index("Tests") + 1, "Edge cases")
+    else:
+        warnings.append("no '## Edge cases' section after '## Tests': list the edge cases and how each is handled")
+    if "Edge cases" in sections and (not sections["Edge cases"].strip() or vi.FILLER_RE.search(sections["Edge cases"])):
+        errors.append("section 'Edge cases' needs real content: each case and the test or step that handles it")
     if order != expected:
         missing = [s for s in expected if s not in order]
         extra = [s for s in order if s not in expected]

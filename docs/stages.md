@@ -54,7 +54,10 @@ Jira ticket / document / breach
   criterion maps to a named test; an independent verifier on a smaller model.
   Automatic (`auto_build`, default on): after every merge, `next_story.py`
   finds each spec's first unfinished story from git and the PR list alone.
-  No plan yet -> a plan PR (merging it is the plan approval); plan merged ->
+  No plan yet -> a plan PR (merging it is the plan approval), which shows a
+  `review-plan` review by a fresh agent: missed edge cases and potential
+  bugs rated critical / high / low (a critical one makes the PR a draft);
+  every plan has an `Edge cases` section the build implements; plan merged ->
   the build runs in CI and opens the story PR (a draft if incomplete);
   story PR merged -> the next story. One story per spec in flight; a closed
   plan or story PR stops that spec until someone re-runs it. Nothing starts

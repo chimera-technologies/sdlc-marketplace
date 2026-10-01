@@ -29,6 +29,14 @@ tokens to use. Delete this section otherwise.>
 |---|---|---|
 | AC-1 | <first acceptance criterion, copied from the spec> | <test file under test_paths> › "S<n> AC-1: <name>" |
 
+## Edge cases
+<One bullet per edge case this story must handle: empty and boundary inputs
+(0, 1, max, max+1), invalid or hostile input, failures of what it depends on
+(storage, network, permissions), repeated or concurrent actions, and state
+left by earlier stories. Say how each is handled and where it is tested:
+"- 501-character task: rejected with the length message (tests/unit/add.test.ts › "S3 AC-2: ...")".
+A case that is deliberately not handled says why.>
+
 ## Steps
 1. <Write the failing tests for AC-1..n.>
 2. <Implement in the smallest steps that turn them green.>
