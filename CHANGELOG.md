@@ -4,6 +4,21 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.16.1 (2026-10-02)
+
+- `sdlc-requirements.yml` also picks up every requirement document that was
+  never turned into intents: one merged before the repo had this workflow
+  (for example before upgrading to v0.16), or one whose run failed (for
+  example on a usage limit). A document counts as done once an intent on
+  the base branch or any intent PR (open, merged or closed) names it, so a
+  rejected split is not redone and an open one is not duplicated. Every
+  intent PR now names its document.
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.16.1`. Merging the upgrade turns any unprocessed
+  document in `requirements/` into intent PRs.
+
 ## v0.16.0 (2026-10-02)
 
 A requirement document starts the loop by itself.
