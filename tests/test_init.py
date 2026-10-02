@@ -207,6 +207,28 @@ class InitTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertEqual(self.read(".sdlc/build.yaml"), before, "an invalid stack is never written")
 
+    def check_files(self):
+        return subprocess.run([sys.executable, str(INIT), "--root", str(self.root), "--check-stack-files"],
+                              capture_output=True, text=True)
+
+    def test_check_stack_files(self):
+        self.run_init()
+        self.assertEqual(self.check_files().returncode, 0, "an undecided stack (as init writes it) is fine")
+        stack = self.root / "s.json"
+        stack.write_text(json.dumps({"toolchains": ["node@24"], "test_command": "npm test",
+                                     "test_file_command": "npm test -- {file}"}), encoding="utf-8")
+        subprocess.run([sys.executable, str(INIT), "--root", str(self.root), "--stack", str(stack)], check=True, capture_output=True)
+        self.assertEqual(self.check_files().returncode, 0, self.check_files().stderr)
+        # A tech lead's hand edits in the stack PR.
+        build = self.root / ".sdlc" / "build.yaml"
+        build.write_text(build.read_text(encoding="utf-8").replace("toolchains: [node@24]", "toolchains: [nodejs@24]"), encoding="utf-8")
+        deploy = self.root / ".sdlc" / "deploy.yaml"
+        deploy.write_text(deploy.read_text(encoding="utf-8").replace("cloud: none", "cloud: oracle"), encoding="utf-8")
+        r = self.check_files()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(".sdlc/build.yaml: toolchain 'nodejs@24' has no preset", r.stderr)
+        self.assertIn(".sdlc/deploy.yaml: cloud must be one of", r.stderr)
+
     def test_toolchains_match_setup_stack(self):
         spec = importlib.util.spec_from_file_location("stack", ROOT / ".github" / "actions" / "setup-stack" / "stack.py")
         st = importlib.util.module_from_spec(spec)

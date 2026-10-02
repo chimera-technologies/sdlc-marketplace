@@ -26,6 +26,7 @@ What it writes (paths relative to the project root):
   intent/ specs/ designs/ plans/ releases/, .gitignore lines
 """
 import argparse
+import importlib.util
 import json
 import re
 import sys
@@ -764,6 +765,54 @@ def set_keys(text, values, what):
     return text
 
 
+def check_stack_files(root):
+    """Problems in the repo's .sdlc/build.yaml and .sdlc/deploy.yaml as they are (hand edits included).
+
+    A stack that is not decided yet (no toolchains or commands, as init first
+    writes it) is fine; once any stack key is set, the whole stack is checked.
+    """
+    root = Path(root)
+    errors = []
+    build = root / ".sdlc" / "build.yaml"
+    if build.is_file():
+        cfg = load_build_yaml(build)
+        stack = {k: cfg.get(k, "") for k in STACK_TEXT_KEYS}
+        stack["toolchains"] = cfg.get("toolchains") or []
+        for key in ("test_paths", "code_paths"):
+            if key in cfg:
+                stack[key] = cfg[key] if isinstance(cfg[key], list) else [cfg[key]]
+        if stack["toolchains"] or any(stack[k] for k in STACK_TEXT_KEYS):
+            errors += [f".sdlc/build.yaml: {e}" for e in validate_stack(stack) if not e.startswith("deploy")]
+    deploy = root / ".sdlc" / "deploy.yaml"
+    if deploy.is_file():
+        dc = _load_module("deploy_config", Path(__file__).resolve().parents[2] / "release" / "scripts" / "deploy_config.py")
+        errors += [f".sdlc/deploy.yaml: {e}" for e in dc.errors(dc.load(root))]
+    return errors
+
+
+def load_build_yaml(path):
+    """Flat `key: value` / `key: [a, b]` with '#' comments, as the build guard reads it."""
+    cfg = {}
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip() or ":" not in line or line.startswith((" ", "\t")):
+            continue
+        key, _, val = line.partition(":")
+        val = val.strip()
+        if val.startswith("[") and val.endswith("]"):
+            cfg[key.strip()] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
+        else:
+            cfg[key.strip()] = val.strip("'\"")
+    return cfg
+
+
+def _load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def set_deploy(root, deploy):
     """Record the spec's cloud and IaC decision in .sdlc/deploy.yaml (other keys kept)."""
     if deploy.get("cloud", "none") not in CLOUDS:
@@ -827,6 +876,8 @@ def main():
     mode.add_argument("--upgrade", metavar="TAG", help="move every pin to a new release tag")
     mode.add_argument("--detect", action="store_true", help="suggest a stack from the repo's files")
     mode.add_argument("--stack", help="JSON stack to record in .sdlc/build.yaml")
+    mode.add_argument("--check-stack-files", action="store_true",
+                      help="validate .sdlc/build.yaml and .sdlc/deploy.yaml as they are (the stack PR check)")
     ap.add_argument("--force", action="store_true", help="also rewrite the create-once config files")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -839,6 +890,13 @@ def main():
             found["infra"] = infra
         print(json.dumps(found, indent=2))
         return 0
+    if args.check_stack_files:
+        problems = check_stack_files(root)
+        for p in problems:
+            print(f"::error::{p}", file=sys.stderr)
+        if not problems:
+            print("OK: .sdlc/build.yaml and .sdlc/deploy.yaml")
+        return 1 if problems else 0
     if args.stack:
         stack = json.loads(Path(args.stack).read_text(encoding="utf-8"))
         problems = validate_stack(stack)

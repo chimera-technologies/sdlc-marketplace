@@ -21,6 +21,11 @@ Recording the stack is automatic: merging a spec opens the stack PR.
 - **`init_project.py --stack` validates** before writing (toolchains with
   presets, a test_command, `{file}` in test_file_command, relative paths,
   no `#`, valid cloud and IaC); `--dry-run` only checks.
+- **Stack check on PRs** (`sdlc-spec-check.yml` job `stack`, check
+  `spec-check / stack`): any PR that changes `.sdlc/build.yaml` or
+  `.sdlc/deploy.yaml`, including a tech lead's hand edits in the stack PR,
+  is validated as it is (`init_project.py --check-stack-files`). An
+  undecided stack (all empty) passes. Add it to the required checks.
 - Caller: a `stack` job and re-run option; `models.stack` (default
   claude-sonnet-5).
 
