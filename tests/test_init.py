@@ -229,6 +229,61 @@ class InitTest(unittest.TestCase):
         self.assertIn(".sdlc/build.yaml: toolchain 'nodejs@24' has no preset", r.stderr)
         self.assertIn(".sdlc/deploy.yaml: cloud must be one of", r.stderr)
 
+    def fake_gh(self, variables=None, secrets=(), login="lead"):
+        def run(cmd, **kw):
+            out, code = "", 0
+            if cmd[:3] == ["gh", "repo", "view"]:
+                out = json.dumps({"nameWithOwner": "acme/app", "defaultBranchRef": {"name": "trunk"}})
+            elif cmd[:3] == ["gh", "api", "user"]:
+                out = json.dumps({"login": login})
+            elif cmd[:3] == ["gh", "variable", "list"]:
+                out = json.dumps([{"name": k, "value": v} for k, v in (variables or {}).items()])
+            elif cmd[:3] == ["gh", "secret", "list"]:
+                out = json.dumps([{"name": s} for s in secrets])
+            elif cmd[:2] == ["git", "ls-remote"]:
+                out = "a\trefs/tags/v0.9.0\nb\trefs/tags/v0.14.0\nc\trefs/tags/v0.10.0\n"
+            return subprocess.CompletedProcess(cmd, code, out, "")
+        return run
+
+    def test_discover_finds_jira_and_subscription(self):
+        found = ip.discover(self.root, self.fake_gh(
+            {"JIRA_BASE_URL": "https://acme.atlassian.net/", "JIRA_USER_EMAIL": "a@x", "SDLC_APP_ID": "1"},
+            ["CLAUDE_CODE_OAUTH_TOKEN", "JIRA_API_TOKEN", "SDLC_APP_PRIVATE_KEY"]))
+        self.assertEqual((found["repo"], found["base_branch"], found["sdlc_ref"], found["owner"]),
+                         ("acme/app", "trunk", "v0.14.0", "@lead"))
+        self.assertEqual(found["jira"], {"enabled": True, "site": "acme.atlassian.net", "space_key": None})
+        self.assertEqual((found["claude_auth"], found["models"]), ("subscription", {"build": "claude-sonnet-5"}))
+        self.assertEqual(found["missing"], [])
+
+    def test_discover_lists_what_is_missing(self):
+        found = ip.discover(self.root, self.fake_gh({"JIRA_BASE_URL": "https://acme.atlassian.net"}, ["ANTHROPIC_API_KEY"]))
+        self.assertEqual(found["claude_auth"], "api_key")
+        self.assertEqual(found["models"], {}, "an API key keeps the default models")
+        self.assertEqual(found["missing"], ["SDLC_APP_ID", "JIRA_USER_EMAIL", "SDLC_APP_PRIVATE_KEY", "JIRA_API_TOKEN"])
+        bare = ip.discover(self.root, self.fake_gh())
+        self.assertFalse(bare["jira"]["enabled"])
+        self.assertIn("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN", bare["missing"])
+
+    def test_discover_without_gh(self):
+        def broken(cmd, **kw):
+            raise OSError("gh not found")
+        found = ip.discover(self.root, broken)
+        self.assertEqual((found["repo"], found["sdlc_ref"], found["base_branch"]), (None, None, "main"))
+
+    def test_rerun_turns_jira_on(self):
+        self.run_init({**ANSWERS, "jira": {"enabled": False}})
+        self.assertIn("enabled: false", self.read(".sdlc/jira.yaml"))
+        owners_before = self.read(".sdlc/owners.yaml")
+        self.run_init({**ANSWERS, "jira": {"enabled": True, "site": "acme.atlassian.net", "space_key": "ACM"}})
+        jira = self.read(".sdlc/jira.yaml")
+        self.assertIn("enabled: true", jira)
+        self.assertIn("space_key: ACM", jira)
+        self.assertEqual(self.read(".sdlc/owners.yaml"), owners_before, "other create-once files are kept")
+        # An upgrade (no Jira answer) never touches jira.yaml.
+        (self.root / ".sdlc" / "jira.yaml").write_text("enabled: true\nsite: acme.atlassian.net\nspace_key: ACM\n# my note\n", encoding="utf-8")
+        subprocess.run([sys.executable, str(INIT), "--root", str(self.root), "--upgrade", "v0.6.1"], check=True, capture_output=True)
+        self.assertIn("# my note", self.read(".sdlc/jira.yaml"))
+
     def test_toolchains_match_setup_stack(self):
         spec = importlib.util.spec_from_file_location("stack", ROOT / ".github" / "actions" / "setup-stack" / "stack.py")
         st = importlib.util.module_from_spec(spec)

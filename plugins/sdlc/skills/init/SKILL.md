@@ -31,15 +31,29 @@ Arguments: `$ARGUMENTS`
 
 ## Set up
 
-1. **Look first.** Confirm this is a git repo with a GitHub remote
-   (`git remote get-url origin`) and note the default branch. Run
-   `python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --detect` for a stack
-   suggestion from the repo's files (it may be empty for a new repo).
-2. **Ask in one message**, with sensible defaults filled in, and let the
-   person correct them:
+1. **Find out first; ask only what you cannot find.** Confirm this is a git
+   repo with a GitHub remote (`git remote get-url origin`). Then run, and
+   use the results as the defaults:
+   - `python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --discover`:
+     the repo, its default branch, the latest plugin tag, the signed-in
+     GitHub user (default owner for every role), the repo's variables and
+     secret names (never values), the Jira site from `JIRA_BASE_URL`, the
+     Claude login (`ANTHROPIC_API_KEY` = API key; `CLAUDE_CODE_OAUTH_TOKEN`
+     = subscription, so builds default to `claude-sonnet-5`), and what is
+     `missing`.
+   - `python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --detect`: a
+     stack suggestion from the repo's files (empty for a new repo).
+   - **Jira**: on whenever `--discover` found a site, or the Atlassian MCP
+     is connected. With the MCP, get the site (`getAccessibleAtlassianResources`)
+     and the spaces (`getVisibleJiraProjects`): exactly one space means use
+     it; several means list them for the person to pick. Never set Jira off
+     because a question was skipped; off only when the person says so.
+2. **Show what you found and ask in one message** only for what is still
+   unknown or needs a decision, with everything found filled in, and let
+   the person correct anything:
    - Owners (GitHub handles or `@org/team`): product owner, service owner,
      tech lead, security owner (default: the tech lead).
-   - Jira: yes or no; if yes, the site (`<name>.atlassian.net`) and space key.
+   - Jira: on or off; the site and space key (filled in from step 1).
      With Jira on, every accepted spec gets an Epic and one Story per spec
      story automatically (when the spec merges), whether or not the intent
      came from a Jira ticket.
@@ -50,13 +64,14 @@ Arguments: `$ARGUMENTS`
      story by hand with `/sdlc:build-story`.
    - Stack: the detected one, or "decide from the spec later". The stack is
      the tech lead's call in the spec; do not invent one for a new repo.
-   - The plugin tag to pin (default: the latest `v*` tag of
-     `bala-chimera/sdlc-marketplace`, e.g. from
-     `git ls-remote --tags https://github.com/bala-chimera/sdlc-marketplace`).
-3. **Write the answers** to `.sdlc-output/init-answers.json`:
+   - The plugin tag to pin (default: `sdlc_ref` from `--discover`, the
+     latest `v*` tag).
+   - Models: `--discover`'s `models` (lighter builds on a subscription).
+3. **Write the answers** to `.sdlc-output/init-answers.json` (include
+   `"models"` when `--discover` suggested any):
 
    ```json
-   {"sdlc_ref": "v0.14.0", "base_branch": "main",
+   {"sdlc_ref": "v0.15.0", "base_branch": "main",
     "owners": {"product_owner": "@po", "service_owner": "@org/sre", "tech_lead": "@lead", "security_owner": "@lead"},
     "jira": {"enabled": true, "site": "acme.atlassian.net", "space_key": "ACM"},
     "stages": {"ui_design": false}, "auto_build": true,
@@ -70,10 +85,15 @@ Arguments: `$ARGUMENTS`
    commit `sdlc: set up the SDLC loop (<tag>)`, push, and open a PR (with
    `gh`, or give the compare link). Tell the person the PR is a config
    change for a platform or tech-lead review.
-6. **Hand over the checklist** the script printed: marketplace access, the
-   sdlc-bot GitHub App, repo variables and secrets, branch protection,
-   Jira Automation, deploy environments, Figma. Offer to walk through any
-   of them.
+6. **Hand over the checklist** the script printed, starting with what is
+   still missing: run `--discover` again and list its `missing` variables
+   and secrets by name (a missing one stops that stage). Then the rest:
+   marketplace access, the sdlc-bot GitHub App, branch protection, Jira
+   Automation, deploy environments, Figma. Offer to walk through any of them.
+
+Re-running `/sdlc:init` in a set-up repo is safe: it keeps `.sdlc/*`
+config, except `jira.yaml`, which follows the Jira answer (so turning Jira
+on, or a new site or space, takes effect).
 
 ## Record the stack
 
