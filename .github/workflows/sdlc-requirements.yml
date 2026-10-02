@@ -125,7 +125,7 @@ jobs:
             gh pr list --repo "$GITHUB_REPOSITORY" --state all --label source:document --limit 500 \
               --json body -q '.[].body' > "$RUNNER_TEMP/doc-prs.txt" 2>/dev/null || true
             for f in requirements/*; do
-              [ -f "$f" ] && grep -qiE "$DOC_RE" <<<"$f" || continue
+              if [ ! -f "$f" ] || ! grep -qiE "$DOC_RE" <<<"$f"; then continue; fi
               grep -qxF "$f" "$RUNNER_TEMP/docs.txt" && continue
               if grep -rqF "$f" intent/ 2>/dev/null || grep -qF "\`$f\`" "$RUNNER_TEMP/doc-prs.txt"; then continue; fi
               echo "Not turned into intents yet: $f"
