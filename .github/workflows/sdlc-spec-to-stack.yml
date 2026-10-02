@@ -1,0 +1,266 @@
+name: "SDLC Design: spec to stack"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Design -> Build: turn a merged spec's stack and cloud decision into .sdlc/build.yaml and .sdlc/deploy.yaml, as a PR for the tech lead.
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# Fires when a spec merges, next to spec-to-stories.
+# 1. sdlc:init mode=headless reads the spec's Technology and architecture
+#    decision and writes a proposal (.sdlc-output/init-stack.json) with the
+#    spec line behind each value, or "not decided" when the spec still says
+#    "Decision needed". Claude never picks between options.
+# 2. init_project.py --stack validates it and applies it (deterministic).
+# 3. Only if build.yaml or deploy.yaml changed: a stack PR (sdlc/stack-<slug>)
+#    for the tech lead. Merging it lets the automatic Build start.
+# Not decided: no PR; the run summary and the spec's Jira record say so.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+      model:
+        description: "Claude model for reading the decision"
+        type: string
+        default: claude-sonnet-5
+      spec_file:
+        description: "Re-run for one merged spec (specs/<slug>.md); empty = specs changed in this push"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
+  INIT: .sdlc-plugin/plugins/sdlc/skills/init/scripts/init_project.py
+  VALIDATE_SPEC: .sdlc-plugin/plugins/sdlc/skills/write-spec/scripts/validate_spec.py
+  MODEL: ${{ inputs.model }}
+  JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+  JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      files: ${{ steps.changed.outputs.files }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: List specs added or modified in this push
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          MANUAL_FILE: ${{ inputs.spec_file }}
+        run: |
+          set -euo pipefail
+          if [ -n "$MANUAL_FILE" ]; then
+            [[ "$MANUAL_FILE" =~ ^specs/[a-z0-9-]+\.md$ ]] || { echo "::error::spec_file must look like specs/<slug>.md"; exit 1; }
+            [ -f "$MANUAL_FILE" ] || { echo "::error::$MANUAL_FILE is not on the base branch"; exit 1; }
+            echo "files=$(jq -cn --arg f "$MANUAL_FILE" '[$f]')" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            BEFORE="$AFTER^"
+          fi
+          files=$(git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" -- 'specs/*.md' | jq -R . | jq -sc .)
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          echo "Specs: $files"
+
+  stack:
+    needs: detect
+    if: needs.detect.outputs.files != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 1   # the stack is project-wide: one proposal at a time
+      matrix:
+        file: ${{ fromJSON(needs.detect.outputs.files) }}
+    env:
+      SPEC: ${{ matrix.file }}
+      SDLC_HEADLESS: "1"
+      SDLC_WRITE_ALLOW: ".sdlc-output/"
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch }}
+          persist-credentials: false
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+          persist-credentials: false
+
+      - name: Read the spec
+        id: meta
+        run: |
+          set -euo pipefail
+          python3 "$VALIDATE_SPEC" --json "$SPEC" > "$RUNNER_TEMP/spec.json"
+          slug=$(jq -r .id "$RUNNER_TEMP/spec.json")
+          [[ "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "::error::bad slug"; exit 1; }
+          lead=$(jq -r '.tech_lead // ""' "$RUNNER_TEMP/spec.json")
+          reviewer=${lead#@}; [[ "$reviewer" == */* ]] && reviewer=""   # teams are routed by CODEOWNERS
+          {
+            echo "slug=$slug"; echo "reviewer=$reviewer"
+            echo "record_id=$(jq -r '.record_id // "none"' "$RUNNER_TEMP/spec.json")"
+          } >> "$GITHUB_OUTPUT"
+          mkdir -p .sdlc-output
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Read the decision with init (headless)
+        run: |
+          set -euo pipefail
+          claude -p "/sdlc:init mode=headless stack=$SPEC" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --model "$MODEL" \
+            --max-turns 30 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Edit,Bash(python3 *init_project.py*)" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/stack-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/stack-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+          # Only the deterministic step below may change .sdlc/.
+          git checkout -- .sdlc/ 2>/dev/null || true
+          [ -s .sdlc-output/init-stack.json ] || { echo "::error::no proposal written (.sdlc-output/init-stack.json)"; exit 1; }
+
+      - name: Validate and apply the proposal
+        id: apply
+        env:
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          set -euo pipefail
+          p=.sdlc-output/init-stack.json
+          jq -e 'type == "object"' "$p" >/dev/null || { echo "::error::$p is not a JSON object"; exit 1; }
+          if [ "$(jq -r '.decided // false' "$p")" != "true" ]; then
+            reason=$(jq -r '.reason // "the spec has no final decision"' "$p")
+            echo "::notice::Stack not decided in $SPEC: $reason"
+            echo "### Stack not decided yet"$'\n\n'"\`$SPEC\`: $reason"$'\n\n'"Builds wait. Decide it in the spec (tech lead), or record it with \`/sdlc:init stack=$SPEC\`." >> "$GITHUB_STEP_SUMMARY"
+            { echo "status=undecided"; echo "reason<<SDLC_EOF"; echo "$reason"; echo "SDLC_EOF"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 "$INIT" --stack "$p"
+          if git diff --quiet -- .sdlc/build.yaml .sdlc/deploy.yaml; then
+            echo "::notice::the stack in .sdlc/ already matches $SPEC; no PR"
+            echo "status=unchanged" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          {
+            echo "The stack and where it runs, read from the accepted spec \`$SPEC\` (Technology and architecture)."
+            echo
+            echo "**Merge to record it: the automatic Build starts with the first story.** Edit the values on this branch if anything is wrong; close it to keep the current ones."
+            echo
+            echo "| Setting | Value | From the spec |"
+            echo "|---|---|---|"
+            jq -r '
+              def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
+              . as $s | ($s.evidence // {}) as $e
+              | ([ "toolchains","install_command","test_command","test_file_command","test_paths","code_paths","report_path","setup_command" ]
+                 | map(select($s[.] != null and $s[.] != "" and $s[.] != [])) | map({k: ., v: $s[.], e: ($e[.] // "")}))
+                + ([ ($s.deploy // {}) | to_entries[] | select(.value != "" and .value != "none") | {k: ("deploy." + .key), v: .value, e: ($e[.key] // $e["deploy." + .key] // "")} ])
+              | .[] | "| `\(.k)` | `\(.v | if type == "array" then join(", ") else . end | cell)` | \(.e | cell) |"' "$p"
+            echo
+            echo '```diff'; git diff -- .sdlc/build.yaml .sdlc/deploy.yaml; echo '```'
+            echo
+            echo "### Review checklist"
+            echo "- [ ] Toolchains, install and test commands are the ones the spec decided"
+            echo "- [ ] Code and test paths cover where this project's code lives"
+            echo "- [ ] Cloud and IaC match the spec (or stay none)"
+          } > "$RUNNER_TEMP/pr-body.md"
+          echo "status=changed" >> "$GITHUB_OUTPUT"
+
+      - name: Upload transcript (evidence)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stack-transcript-${{ steps.meta.outputs.slug }}
+          path: |
+            ${{ runner.temp }}/stack-transcript.jsonl
+            .sdlc-output/init-stack.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Open the stack PR
+        if: steps.apply.outputs.status == 'changed'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+          branch: sdlc/stack-${{ steps.meta.outputs.slug }}
+          base: ${{ inputs.base_branch }}
+          add-paths: |
+            .sdlc/build.yaml
+            .sdlc/deploy.yaml
+          commit-message: |
+            sdlc: record the stack for ${{ steps.meta.outputs.slug }}
+
+            From ${{ matrix.file }} @ ${{ github.sha }}
+          title: "sdlc: record the stack for ${{ steps.meta.outputs.slug }}"
+          body-path: ${{ runner.temp }}/pr-body.md
+          labels: stack
+          reviewers: ${{ steps.meta.outputs.reviewer }}
+
+      - name: Tell the spec's Jira record (not decided)
+        if: steps.apply.outputs.status == 'undecided' && steps.meta.outputs.record_id != 'none'
+        continue-on-error: true   # Jira never blocks the loop
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          KEY: ${{ steps.meta.outputs.record_id }}
+          REASON: ${{ steps.apply.outputs.reason }}
+        run: |
+          python3 "$PLUGIN_DIR/skills/build-story/scripts/jira_story.py" "$KEY" comment "The stack for $SPEC is not decided yet, so builds wait: $REASON. The tech lead decides it in the spec, or records it with /sdlc:init stack=$SPEC."

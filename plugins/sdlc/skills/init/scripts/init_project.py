@@ -36,7 +36,7 @@ GRAPHIFY_VERSION = "0.9.71"
 PONYTAIL_REF = "v4.10.0"
 STAGES = ["plan", "design", "ui_design", "build", "pr_review", "test", "deploy", "maintain"]
 DEFAULT_MODELS = {"intake": "claude-sonnet-5", "spec": "claude-opus-5-5", "review": "claude-sonnet-5",
-                  "build": "claude-opus-5-5"}
+                  "build": "claude-opus-5-5", "stack": "claude-sonnet-5"}
 BEGIN, END = "<!-- sdlc:begin -->", "<!-- sdlc:end -->"
 FOLDERS = ["intent", "specs", "designs", "plans", "releases", "runbooks"]
 GITIGNORE = [".sdlc-input/", ".sdlc-output/", ".sdlc-plugin/", "graphify-out/",
@@ -297,7 +297,9 @@ def render_claude_block(a):
     if s["plan"]:
         rows.append("| Plan | `/sdlc:write-intent` (or a Jira ticket labelled `intent`) | `intent/<slug>.md` | owner merges the intent PR |")
     if s["design"]:
-        rows.append("| Design | automatic when an intent merges (`sdlc:write-spec`, `sdlc:review-spec`) | `specs/<slug>.md` | owner (+ tech lead if risk is high) merges |")
+        rows.append("| Design | automatic when an intent merges (`sdlc:write-spec`, `sdlc:review-spec`); merging the spec opens a stack PR "
+                    "with its stack and cloud decision | `specs/<slug>.md`, then `.sdlc/build.yaml` and `.sdlc/deploy.yaml` | "
+                    "owner (+ tech lead if risk is high) merges the spec; the tech lead merges the stack PR |")
     if s["ui_design"]:
         rows.append("| UI design | automatic with the spec (HTML mockups); `/sdlc:design-ui` to redo them or refine them in Figma | `designs/<slug>/` | owner merges the spec PR (or a design PR) |")
     if s["build"] and a["auto_build"]:
@@ -401,6 +403,13 @@ def render_callers(a):
             a, "sdlc-spec-to-stories.yml",
             extra_with="      spec_file: ${{ inputs.rerun == 'spec-to-stories' && inputs.file || '' }}\n",
             if_expr="github.event_name == 'push' || inputs.rerun == 'spec-to-stories'"))
+    auto_stack = s["design"] and s["build"]
+    if auto_stack:
+        # A merged spec's stack and cloud decision becomes a stack PR for the tech lead.
+        jobs.append("  stack:\n" + call(
+            a, "sdlc-spec-to-stack.yml",
+            extra_with=f"      model: {m['stack']}\n      spec_file: ${{{{ inputs.rerun == 'stack' && inputs.file || '' }}}}\n",
+            if_expr="github.event_name == 'push' || inputs.rerun == 'stack'"))
     auto_build = s["build"] and a["auto_build"]
     if auto_build:
         jobs.append("  build:\n" + call(
@@ -420,7 +429,7 @@ def render_callers(a):
             permissions="    permissions:\n      contents: read\n      id-token: write\n"))
     if jobs:
         options = [o for o, on in (("intent-to-spec", s["design"]), ("spec-to-stories", s["design"]),
-                                   ("build", auto_build), ("release", s["deploy"])) if on]
+                                   ("stack", auto_stack), ("build", auto_build), ("release", s["deploy"])) if on]
         files[".github/workflows/sdlc-push.yml"] = (
             header(a, "SDLC push", f"After a merge to {a['base_branch']}: the next stage for each merged artifact, and the tests.")
             + f"on:\n  push:\n    branches: [{a['base_branch']}]\n"
@@ -683,6 +692,59 @@ def set_stack(root, stack):
 
 DEPLOY_KEYS = ["cloud", "iac", "iac_dir", "iac_var_file", "iac_backend_config", "deploy_command", "smoke_command"]
 CLOUDS, IACS = ("none", "aws", "azure", "gcp"), ("none", "terraform")
+# Same list as .github/actions/setup-stack/stack.py SUPPORTED (a test keeps them equal).
+TOOLCHAINS = ["node", "python", "java", "dotnet", "go", "terraform", "helm", "kubectl"]
+TOOLCHAIN_RE = re.compile(r"^([a-z]+)@v?\d[\w.\-]*$")
+STACK_TEXT_KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path"]
+
+
+def validate_stack(stack):
+    """Problems with a proposed stack (empty list = can be recorded)."""
+    errors = []
+    if not isinstance(stack, dict):
+        return ["the stack must be a JSON object"]
+    chains = stack.get("toolchains", [])
+    if not isinstance(chains, list):
+        errors.append("toolchains must be a list like [\"node@22\"]")
+        chains = []
+    for item in chains:
+        m = TOOLCHAIN_RE.match(str(item))
+        if not m:
+            errors.append(f"toolchain {item!r} must look like <name>@<version>")
+        elif m.group(1) not in TOOLCHAINS:
+            errors.append(f"toolchain {item!r} has no preset ({', '.join(TOOLCHAINS)}); install it with setup_command")
+    if not str(stack.get("test_command", "")).strip():
+        errors.append("test_command is required (the Test stage and every build run it)")
+    tfc = str(stack.get("test_file_command", ""))
+    if tfc and "{file}" not in tfc:
+        errors.append("test_file_command must contain {file}")
+    for key in STACK_TEXT_KEYS:
+        if not isinstance(stack.get(key, ""), str):
+            errors.append(f"{key} must be a string")
+        elif "#" in stack.get(key, "") or "\n" in stack.get(key, ""):
+            errors.append(f"{key} must be one line without '#'")
+    for key in ("test_paths", "code_paths"):
+        paths = stack.get(key, [])
+        if not isinstance(paths, list) or any(not isinstance(p, str) or p.startswith("/") or ".." in Path(p).parts
+                                              for p in paths):
+            errors.append(f"{key} must be a list of relative paths inside the repo")
+    deploy = stack.get("deploy") or {}
+    if not isinstance(deploy, dict):
+        errors.append("deploy must be an object")
+        deploy = {}
+    if deploy.get("cloud", "none") not in CLOUDS:
+        errors.append(f"deploy.cloud must be one of {', '.join(CLOUDS)}")
+    if deploy.get("iac", "none") not in IACS:
+        errors.append(f"deploy.iac must be one of {', '.join(IACS)}")
+    for key in DEPLOY_KEYS:
+        val = deploy.get(key, "")
+        if not isinstance(val, str) or "#" in val or "\n" in val:
+            errors.append(f"deploy.{key} must be one line without '#'")
+    for key in ("iac_dir", "iac_var_file", "iac_backend_config"):
+        val = deploy.get(key, "")
+        if isinstance(val, str) and (val.startswith("/") or ".." in Path(val).parts):
+            errors.append(f"deploy.{key} must be a relative path inside the repo")
+    return errors
 
 
 def set_keys(text, values, what):
@@ -779,6 +841,14 @@ def main():
         return 0
     if args.stack:
         stack = json.loads(Path(args.stack).read_text(encoding="utf-8"))
+        problems = validate_stack(stack)
+        for p in problems:
+            print(f"::error::stack: {p}", file=sys.stderr)
+        if problems:
+            return 1
+        if args.dry_run:
+            print("OK: the stack can be recorded")
+            return 0
         path = set_stack(root, stack)
         print(f"recorded the stack in {path.as_posix()}"
               + (" and the cloud and IaC in .sdlc/deploy.yaml" if stack.get("deploy") else ""))

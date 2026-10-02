@@ -165,9 +165,53 @@ class InitTest(unittest.TestCase):
         push = self.read(".github/workflows/sdlc-push.yml")
         self.assertIn("uses: bala-chimera/sdlc-marketplace/.github/workflows/sdlc-build.yml@v0.6.0", push)
         self.assertIn("inputs.rerun == 'build'", push)
-        self.assertIn("options: [intent-to-spec, spec-to-stories, build, release]", push)
+        self.assertIn("options: [intent-to-spec, spec-to-stories, stack, build, release]", push)
         self.assertTrue(json.loads(self.read(".sdlc/sdlc.json"))["auto_build"])
         self.assertIn("a plan PR (reviewed for edge cases and bugs), then the build", self.read("CLAUDE.md"))
+
+    def test_stack_pr_comes_with_the_spec(self):
+        self.run_init()
+        push = self.read(".github/workflows/sdlc-push.yml")
+        self.assertIn("sdlc-spec-to-stack.yml@v0.6.0", push)
+        self.assertIn("spec_file: ${{ inputs.rerun == 'stack' && inputs.file || '' }}", push)
+        self.assertIn("options: [intent-to-spec, spec-to-stories, stack, build, release]", push)
+        self.assertIn("opens a stack PR", self.read("CLAUDE.md"))
+        self.run_init({**ANSWERS, "stages": {"build": False}})
+        self.assertNotIn("sdlc-spec-to-stack.yml", self.read(".github/workflows/sdlc-push.yml"))
+
+    def test_validate_stack(self):
+        good = {"toolchains": ["node@22", "terraform@1.9.8", "helm@v3.16.2"], "test_command": "npm test",
+                "test_file_command": "npm test -- {file}", "code_paths": ["src/"], "deploy": {"cloud": "aws", "iac": "terraform"},
+                "decided": True, "evidence": {"toolchains": "Node LTS"}}
+        self.assertEqual(ip.validate_stack(good), [])
+        bad = {"toolchains": ["rust@1", "node"], "test_file_command": "npm test", "install_command": "npm ci # all",
+               "code_paths": ["../x"], "deploy": {"cloud": "oracle", "iac_dir": "/abs"}}
+        text = " ".join(ip.validate_stack(bad))
+        for frag in ("has no preset", "must look like <name>@<version>", "test_command is required", "must contain {file}",
+                     "one line without '#'", "relative paths inside the repo", "deploy.cloud must be one of",
+                     "deploy.iac_dir must be a relative path"):
+            self.assertIn(frag, text)
+
+    def test_stack_dry_run_and_rejection(self):
+        self.run_init()
+        good = self.root / "good.json"
+        good.write_text(json.dumps({"toolchains": ["python@3.12"], "test_command": "pytest -q", "decided": True}), encoding="utf-8")
+        before = self.read(".sdlc/build.yaml")
+        r = subprocess.run([sys.executable, str(INIT), "--root", str(self.root), "--stack", str(good), "--dry-run"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.read(".sdlc/build.yaml"), before, "--dry-run writes nothing")
+        bad = self.root / "bad.json"
+        bad.write_text(json.dumps({"toolchains": ["cobol@1"]}), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(INIT), "--root", str(self.root), "--stack", str(bad)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(self.read(".sdlc/build.yaml"), before, "an invalid stack is never written")
+
+    def test_toolchains_match_setup_stack(self):
+        spec = importlib.util.spec_from_file_location("stack", ROOT / ".github" / "actions" / "setup-stack" / "stack.py")
+        st = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(st)
+        self.assertEqual(ip.TOOLCHAINS, st.SUPPORTED)
 
     def test_workflows_setting(self):
         self.run_init()
