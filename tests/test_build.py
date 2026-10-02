@@ -351,6 +351,39 @@ class NextStoryTest(Repo):
     def test_manual_build_in_progress_pauses(self):
         self.assertIn("manual build", self.only(self.decide([("story/clm-9-local", "OPEN")]))["reason"])
 
+    def mark_infra(self, story="S1"):
+        spec = self.root / "specs" / SPEC.name
+        text = spec.read_text(encoding="utf-8")
+        head = next(l for l in text.splitlines() if l.startswith(f"### {story}:"))
+        spec.write_text(text.replace(head, head + "\nInfrastructure: yes", 1), encoding="utf-8")
+
+    def test_infra_story_is_held_and_later_stories_carry_on(self):
+        self.mark_infra("S1")
+        result = self.decide()
+        held = next(w for w in result["waiting"] if w.get("story") == "S1")
+        self.assertIn("infrastructure story: record where it runs", held["reason"])
+        self.assertEqual([(a["action"], a["story"]) for a in result["actions"]], [("plan", "S2")])
+
+    def test_held_story_waits_for_the_one_in_flight(self):
+        self.mark_infra("S1")
+        (self.root / ".sdlc" / "deploy.yaml").write_text("cloud: aws\niac: terraform\n", encoding="utf-8")
+        # S2 went ahead while S1 was held; with S2 still open, S1 must not start too.
+        w = self.only(self.decide([("plan/claims-status-self-service-s2", "OPEN")]))
+        self.assertEqual(w["story"], "S2")
+        self.assertIn("plan PR open", w["reason"])
+
+    def test_recording_the_platform_releases_the_hold(self):
+        self.mark_infra("S1")
+        for deploy in ("cloud: gcp\n", "iac: terraform\n", "deploy_command: ./deploy.sh\n"):
+            with self.subTest(deploy=deploy):
+                (self.root / ".sdlc" / "deploy.yaml").write_text(deploy, encoding="utf-8")
+                a = self.only(self.decide())
+                self.assertEqual((a["action"], a["story"]), ("plan", "S1"))
+
+    def test_unmarked_stories_are_never_held(self):
+        (self.root / ".sdlc" / "deploy.yaml").write_text("cloud: none\n", encoding="utf-8")
+        self.assertEqual(self.only(self.decide())["story"], "S1")
+
     def test_cli(self):
         prs = self.root / "prs.json"
         prs.write_text("[]", encoding="utf-8")

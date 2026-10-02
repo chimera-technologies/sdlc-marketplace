@@ -38,6 +38,11 @@ architect chooses.
 - **Build**: never applies infrastructure (blocked commands, no cloud
   credentials); Graphify does not index `.tf`/YAML, so build-story reads
   those files directly.
+- **Infrastructure stories wait for the cloud decision**: the spec marks
+  them `Infrastructure: yes`; automatic Build holds them until
+  `.sdlc/deploy.yaml` records a cloud, an IaC tool or a deploy_command, and
+  builds the application stories meanwhile (still one story per spec in
+  flight).
 
 ### Upgrading
 

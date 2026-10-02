@@ -66,7 +66,9 @@ Jira ticket / document / breach
   the build runs in CI and opens the story PR (a draft if incomplete);
   story PR merged -> the next story. One story per spec in flight; a closed
   plan or story PR stops that spec until someone re-runs it. Nothing starts
-  until `.sdlc/build.yaml` has a `test_command`. The build may not change
+  until `.sdlc/build.yaml` has a `test_command`; stories the spec marks
+  `Infrastructure: yes` also wait until `.sdlc/deploy.yaml` records where it
+  runs (cloud, IaC or deploy_command), while the others go ahead. The build may not change
   `.github/`, `.sdlc/`, `specs/`, `plans/` or other SDLC files (hook, and
   reverted before the PR). Works with or without Jira (branches
   `story/<jira-key>-<name>` or `story/<spec-slug>-s<n>`). With Jira, the

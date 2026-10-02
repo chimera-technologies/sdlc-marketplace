@@ -76,7 +76,11 @@ Follow the template's headings exactly, in order.
     the accepted choice in `.sdlc/build.yaml` and `.sdlc/deploy.yaml`.
   - Infrastructure work gets its own stories with testable criteria (for
     example "terraform validate and checkov pass", "the staging smoke test
-    reaches /healthz over HTTPS"), marked "No UI" in the design.
+    reaches /healthz over HTTPS"), marked "No UI" in the design. Put the
+    line `Infrastructure: yes` directly under the heading of every story
+    that creates or changes cloud resources, IaC, images, cluster
+    manifests or the pipeline: automatic Build holds those stories until
+    the cloud decision is recorded, and builds the others meanwhile.
 - **Design**: components, data flow, interfaces, rollout and rollback.
   Enough for an engineer to plan the build. No code.
 - **Security considerations**: one row per `sdlc:security-policy` rule

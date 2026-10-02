@@ -23,6 +23,11 @@ while .sdlc/build.yaml has no test_command (record the stack first), or
 while a story PR is open that no plan on the base branch explains (a
 manual build in progress).
 
+A story the spec marks "Infrastructure: yes" is held (skipped, so later
+application stories carry on) until .sdlc/deploy.yaml records where the
+app runs: a cloud, an IaC tool or a deploy_command (/sdlc:init stack=).
+Only one story per spec is in flight at a time, held or not.
+
 Prints JSON: {"actions": [...], "waiting": [...]}.
 """
 import argparse
@@ -37,6 +42,14 @@ _spec = importlib.util.spec_from_file_location("validate_plan", _VP_PATH)
 vp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(vp)
 vs, vi, bg = vp.vs, vp.vi, vp.bg
+
+_DC_PATH = Path(__file__).resolve().parents[2] / "release" / "scripts" / "deploy_config.py"
+_dspec = importlib.util.spec_from_file_location("deploy_config", _DC_PATH)
+dc = importlib.util.module_from_spec(_dspec)
+_dspec.loader.exec_module(dc)
+
+# The spec marks a story that needs the cloud decision: "Infrastructure: yes".
+INFRA_RE = re.compile(r"(?im)^\s*infrastructure:\s*yes\b")
 
 
 def pr_states(prs):
@@ -60,6 +73,8 @@ def decide(root, prs, only_spec=None):
     specs = sorted((root / "specs").glob("*.md")) if (root / "specs").is_dir() else []
     if only_spec:
         specs = [root / only_spec]
+    d = dc.load(root)
+    platform = d["cloud"] != "none" or d["iac"] != "none" or bool(d["deploy_command"])
     known = {plan_branch(p) for p in (root / "plans").glob("*.md")} if (root / "plans").is_dir() else set()
     untracked = sorted(b for b, s in states.items() if b.startswith("story/") and "OPEN" in s and b not in known)
 
@@ -80,34 +95,53 @@ def decide(root, prs, only_spec=None):
                                                    f"({', '.join(untracked)}): a manual build is in progress"})
             continue
         slug = spec.stem
-        for story in stories:
-            sid = f"{slug}-{story['id'].lower()}"
-            item = {"spec": rel, "slug": slug, "story": story["id"], "title": story["title"], "id": sid}
-            plan = root / "plans" / f"{sid}.md"
-            if plan.is_file():
-                branch = plan_branch(plan)
-                got = states.get(branch, set())
-                if "MERGED" in got:
-                    continue  # done
-                if "OPEN" in got:
-                    waiting.append({**item, "reason": f"story PR open ({branch})"})
-                elif "CLOSED" in got:
-                    waiting.append({**item, "reason": f"story PR closed without merge ({branch}); "
-                                                      f"rebuild with /sdlc:build-story {story['id']}"})
-                else:
-                    actions.append({**item, "action": "build", "plan": plan.relative_to(root).as_posix(),
-                                    "branch": branch})
+        items = [story_state(root, states, rel, slug, s) for s in stories]
+        # One story per spec in flight, whatever is held.
+        busy = next((x for x in items if x["state"] == "open"), None)
+        if busy:
+            waiting.append({**busy["item"], "reason": busy["reason"]})
+            continue
+        for x in items:
+            if x["state"] == "done":
+                continue
+            if x["state"] == "closed":
+                waiting.append({**x["item"], "reason": x["reason"]})
                 break
-            got = states.get(f"plan/{sid}", set())
-            if "OPEN" in got:
-                waiting.append({**item, "reason": f"plan PR open (plan/{sid})"})
-            elif "CLOSED" in got and "MERGED" not in got:
-                waiting.append({**item, "reason": f"plan PR closed without merge (plan/{sid}); "
-                                                  f"plan it with /sdlc:build-story {story['id']}"})
-            else:
-                actions.append({**item, "action": "plan"})
+            if x["infra"] and not platform:
+                # Held until the spec's cloud and IaC decision is recorded; later stories carry on.
+                waiting.append({**x["item"], "reason": "infrastructure story: record where it runs (cloud, iac or "
+                                                       f"deploy_command) with /sdlc:init stack={rel}"})
+                continue
+            actions.append({**x["item"], **x["action"]})
             break
     return {"actions": actions, "waiting": waiting}
+
+
+def story_state(root, states, rel, slug, story):
+    """One story: done | open | closed | ready, with what to do or why it waits."""
+    sid = f"{slug}-{story['id'].lower()}"
+    item = {"spec": rel, "slug": slug, "story": story["id"], "title": story["title"], "id": sid}
+    out = {"item": item, "infra": bool(INFRA_RE.search(story.get("body", ""))), "reason": "", "action": None}
+    plan = root / "plans" / f"{sid}.md"
+    if plan.is_file():
+        branch = plan_branch(plan)
+        got = states.get(branch, set())
+        if "MERGED" in got:
+            return {**out, "state": "done"}
+        if "OPEN" in got:
+            return {**out, "state": "open", "reason": f"story PR open ({branch})"}
+        if "CLOSED" in got:
+            return {**out, "state": "closed", "reason": f"story PR closed without merge ({branch}); "
+                                                        f"rebuild with /sdlc:build-story {story['id']}"}
+        return {**out, "state": "ready",
+                "action": {"action": "build", "plan": plan.relative_to(root).as_posix(), "branch": branch}}
+    got = states.get(f"plan/{sid}", set())
+    if "OPEN" in got:
+        return {**out, "state": "open", "reason": f"plan PR open (plan/{sid})"}
+    if "CLOSED" in got and "MERGED" not in got:
+        return {**out, "state": "closed", "reason": f"plan PR closed without merge (plan/{sid}); "
+                                                    f"plan it with /sdlc:build-story {story['id']}"}
+    return {**out, "state": "ready", "action": {"action": "plan"}}
 
 
 def main():
