@@ -8,7 +8,8 @@ description: Use whenever a problem, idea, feature request, Jira ticket,
   intent", "turn this into a proto-spec", "read <file> and create an
   intent", when brainstorming reaches the point where it must be committed
   for someone else to act on, or when invoked headless with mode=headless.
-  Interactively it can split a requirement document into several intents
+  Headless with source=document, it turns a requirement document committed
+  to requirements/ into several intents. Interactively it can split a requirement document into several intents
   and create a Jira Epic for each (after the person confirms); large
   documents go through a Claude Code workflow.
 argument-hint: "[mode=headless] [source=jira|maintain|claude-security|claude-tag] [record_id=ABC-123] [input=<path>] [slug=<slug>]"
@@ -145,7 +146,7 @@ Downstream workflows parse these fields, so they are not optional:
 | `id` | kebab-case slug, max ~6 words. Must equal the file name. If `intent/<slug>.md` already exists, pick a distinct slug. |
 | `title` | Same as the H1, in the originator's words. |
 | `author` | The originator (for Jira: the reporter), not you. `Name (team/role)`. |
-| `source` | `human`, `jira`, `maintain`, `claude-security`, `claude-tag`. |
+| `source` | `human`, `jira`, `maintain`, `claude-security`, `claude-tag`, `document` (a requirement document in `requirements/`, read in CI). |
 | `record_id` | Jira key, or `none`. Required when source is `jira`. With no ticket (a document or a conversation), Step 5 offers to create an Epic and fills this in. |
 | `fingerprint` | Dedup key passed in by headless workflows, or `none`. |
 | `systems` | Component names as listed under `components` in `.sdlc/owners.yaml`. If none matches, use `[unknown]` and ask who owns it under Open questions. Never invent a component name; the validator warns on names it doesn't know. |

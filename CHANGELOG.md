@@ -4,6 +4,32 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.16.0 (2026-10-02)
+
+A requirement document starts the loop by itself.
+
+- **New `sdlc-requirements.yml`** (push caller job `requirements`, re-run
+  option `requirements`): a push that adds or changes a document in
+  `requirements/` (`.md`, `.txt`, `.pdf`) runs `sdlc:write-intent
+  mode=headless source=document`. It splits the document into intents
+  (large ones through the `requirements-to-intents` workflow) and opens one
+  intent PR per intent, for its owner, with the sections it covers, why it
+  stands alone, its sibling intents and anything no intent covers. Merging
+  an intent PR accepts it (Design starts); closing it rejects it; that is
+  where the split is confirmed. Existing intents are never rewritten; a
+  changed document only adds intents for new outcomes (fingerprint
+  `req-<document>-<slug>`).
+- **`/sdlc:init`** creates `requirements/`, finds documents already there
+  (`--discover` lists them), asks for one when there is none, copies it in
+  and commits it with the setup PR: merging the setup PR starts the loop.
+- New intent `source: document`; `models.requirements` (default
+  claude-opus-5-5).
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.16.0`, then commit a requirement document to
+  `requirements/` in a PR; merging it opens the intent PRs.
+
 ## v0.15.0 (2026-10-02)
 
 `/sdlc:init` finds what is already set up and configures itself.

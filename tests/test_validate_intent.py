@@ -144,6 +144,15 @@ class ValidateIntentTest(unittest.TestCase):
         _, errors, _ = self.check(text)
         self.assertError(errors, "'Evidence' is required")
 
+    def test_document_source(self):
+        # An intent drafted in CI from a requirement document in requirements/.
+        text = (self.example.replace("source: jira", "source: document").replace("record_id: CLM-482", "record_id: none")
+                .replace("fingerprint: none", "fingerprint: req-shop-requirements-claims-status-self-service"))
+        _, errors, _ = self.check(text)
+        self.assertEqual(errors, [])
+        text = text.replace("- Jira CLM-482 (reporter: Priya Nair)\n- Call-reason report, Q3: \"claim status\" is the top call reason", "None.")
+        self.assertError(self.check(text)[1], "'Evidence' is required")
+
     def test_long_intent_warns_not_errors(self):
         text = self.example.replace("## Proposed outcome", "word " * 800 + "\n\n## Proposed outcome")
         _, errors, warnings = self.check(text)

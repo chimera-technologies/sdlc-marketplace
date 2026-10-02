@@ -49,7 +49,9 @@ on the marketplace repo (or someone who has it).
 
 ## 3. First run
 
-- Plan: `/sdlc:write-intent` with a requirement, or label a Jira ticket
+- Plan: put the requirement document in `requirements/` (init asks for it
+  and adds it to the setup PR); merging the setup PR turns it into one
+  intent PR per intent. Or `/sdlc:write-intent` with a requirement, or label a Jira ticket
   `intent`. Merge the intent PR: the spec PR follows.
 - After the spec merges, a **stack PR** opens by itself with the spec's
   stack and cloud decision for `.sdlc/build.yaml` and `.sdlc/deploy.yaml`

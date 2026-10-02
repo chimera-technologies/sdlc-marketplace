@@ -1,0 +1,297 @@
+name: "SDLC Plan: requirement document to intents"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Plan: a requirement document in requirements/ becomes one intent PR per intent (sdlc:write-intent, source document).
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# Fires on a push that adds or changes a requirement document in
+# requirements/ (.md, .txt or .pdf), for example merging the setup PR that
+# /sdlc:init committed it in.
+#   draft -> sdlc:write-intent mode=headless source=document splits the
+#            document into intents (large documents through the
+#            requirements-to-intents workflow) and writes intent/<slug>.md for
+#            each new one; existing intents are never rewritten.
+#   prs   -> one intent PR per intent, for its owner. Merging an intent PR
+#            accepts it (and starts Design); closing it rejects it. This is
+#            where the person confirms the split.
+# Re-running on a changed document only adds intents for new outcomes
+# (fingerprint req-<document>-<slug>).
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: bala-chimera/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL, empty = no Jira"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL"
+        type: string
+        default: ""
+      model:
+        description: "Claude model for reading the document"
+        type: string
+        default: claude-opus-5-5
+      document:
+        description: "Re-run for one document (requirements/<file>); empty = documents changed in this push"
+        type: string
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
+  VALIDATE: .sdlc-plugin/plugins/sdlc/skills/write-intent/scripts/validate_intent.py
+  MODEL: ${{ inputs.model }}
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      intents: ${{ steps.collect.outputs.intents }}
+    env:
+      SDLC_HEADLESS: "1"
+      SDLC_WRITE_ALLOW: "intent/,.sdlc-output/"
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find the documents
+        id: docs
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          MANUAL: ${{ inputs.document }}
+          # A requirement document: any .md, .txt or .pdf directly in requirements/.
+          DOC_RE: '^requirements/[^/]+\.(md|txt|pdf)$'
+        run: |
+          set -euo pipefail
+          if [ -n "$MANUAL" ]; then
+            grep -qiE "$DOC_RE" <<<"$MANUAL" || { echo "::error::document must be requirements/<file>.md, .txt or .pdf"; exit 1; }
+            [ -f "$MANUAL" ] || { echo "::error::$MANUAL is not on the base branch"; exit 1; }
+            printf '%s\n' "$MANUAL" > "$RUNNER_TEMP/docs.txt"
+          else
+            if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+              BEFORE="$AFTER^"
+            fi
+            git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" \
+              | grep -iE "$DOC_RE" > "$RUNNER_TEMP/docs.txt" || true
+          fi
+          echo "Documents:"; cat "$RUNNER_TEMP/docs.txt"
+          echo "count=$(wc -l < "$RUNNER_TEMP/docs.txt")" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the sdlc plugin (pinned)
+        if: steps.docs.outputs.count != '0'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        if: steps.docs.outputs.count != '0'
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        if: steps.docs.outputs.count != '0'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Turn each document into intents (write-intent, headless)
+        if: steps.docs.outputs.count != '0'
+        run: |
+          set -euo pipefail
+          mkdir -p intent .sdlc-output "$RUNNER_TEMP/out"
+          while read -r doc; do
+            [ -n "$doc" ] || continue
+            name=$(basename "$doc"); stem=$(tr 'A-Z._' 'a-z--' <<<"${name%.*}")
+            echo "::group::$doc"
+            rm -f .sdlc-output/intents.json
+            claude -p "/sdlc:write-intent mode=headless source=document input=$doc" \
+              --plugin-dir "$PLUGIN_DIR" \
+              --model "$MODEL" \
+              --max-turns 120 \
+              --strict-mcp-config \
+              --allowedTools "Read,Glob,Grep,Write,Edit,Bash(python3 *validate_intent.py*),Workflow,ToolSearch" \
+              --output-format stream-json --verbose \
+              > "$RUNNER_TEMP/out/transcript-$stem.jsonl" || echo "::warning::write-intent ended with an error for $doc"
+            tail -n1 "$RUNNER_TEMP/out/transcript-$stem.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+            if [ -f .sdlc-output/intents.json ]; then
+              jq --arg d "$doc" '.document = $d' .sdlc-output/intents.json > "$RUNNER_TEMP/out/split-$stem.json"
+            fi
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/docs.txt"
+
+      - name: Collect the new intents
+        id: collect
+        if: steps.docs.outputs.count != '0'
+        run: |
+          set -euo pipefail
+          # Existing intents are never rewritten by a document run.
+          git checkout -- intent/ 2>/dev/null || true
+          mapfile -t files < <(git status --porcelain -- intent/ | awk '$1 == "??" {print $2}' | grep -E '^intent/[a-z0-9-]+\.md$' || true)
+          mkdir -p "$RUNNER_TEMP/out/intent"
+          list='[]'
+          for f in "${files[@]}"; do
+            slug=$(basename "$f" .md)
+            if python3 "$VALIDATE" --owners .sdlc/owners.yaml "$f" 2> "$RUNNER_TEMP/out/intent/$slug.errors"; then valid=true; else valid=false; fi
+            cp "$f" "$RUNNER_TEMP/out/intent/"
+            list=$(jq -c --arg s "$slug" --argjson v "$valid" '. + [{slug: $s, valid: $v}]' <<<"$list")
+          done
+          echo "New intents: $list"
+          {
+            echo "### Intents from requirement documents"
+            jq -r '.[] | "- `\(.slug)`\(if .valid then "" else " (validation failed: draft PR)" end)"' <<<"$list"
+            for s in "$RUNNER_TEMP"/out/split-*.json; do
+              [ -f "$s" ] || continue
+              jq -r '"\n**\(.document)**: not covered by any intent:", (.uncovered // [] | if length == 0 then "- nothing" else .[] | "- \(.)" end)' "$s"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "intents=$list" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the drafts
+        if: always() && steps.docs.outputs.count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: requirement-intents-${{ github.run_id }}
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  prs:
+    needs: draft
+    if: needs.draft.outputs.intents != '' && needs.draft.outputs.intents != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        item: ${{ fromJSON(needs.draft.outputs.intents) }}
+    env:
+      SLUG: ${{ matrix.item.slug }}
+      VALID: ${{ matrix.item.valid }}
+    steps:
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: requirement-intents-${{ github.run_id }}
+          path: ${{ runner.temp }}/out
+
+      - name: Place this intent and write the PR body
+        id: body
+        run: |
+          set -euo pipefail
+          mkdir -p intent
+          cp "$RUNNER_TEMP/out/intent/$SLUG.md" "intent/$SLUG.md"
+          python3 "$VALIDATE" --json "intent/$SLUG.md" > "$RUNNER_TEMP/fm.json" 2>/dev/null || echo '{}' > "$RUNNER_TEMP/fm.json"
+          title=$(jq -r '.title // env.SLUG' "$RUNNER_TEMP/fm.json")
+          owner=$(jq -r '.owner // ""' "$RUNNER_TEMP/fm.json")
+          split=$(grep -l "\"$SLUG\"" "$RUNNER_TEMP"/out/split-*.json 2>/dev/null | head -n1 || true)
+          {
+            if [ -n "$split" ]; then
+              doc=$(jq -r .document "$split")
+              echo "Intent drafted from the requirement document \`$doc\`, one of $(jq '.intents | length' "$split") intents it was split into."
+              echo
+              jq -r --arg s "$SLUG" '.intents[] | select(.slug == $s) | "**Sections:** \(.sections | join(", "))\n\n**Why it stands alone:** \(.why)"' "$split"
+              echo
+              echo "**The other intents from this document:** $(jq -r --arg s "$SLUG" '[.intents[] | select(.slug != $s) | "`\(.slug)`"] | join(", ")' "$split")"
+            else
+              echo "Intent drafted from a requirement document in \`requirements/\`."
+            fi
+            echo
+            echo "**Merge to accept this intent: Design starts automatically.** Close it with a reason to reject it, or edit it on this branch. Each intent from the document is its own PR, so you confirm the split by merging the ones you accept."
+            echo
+            if [ "$VALID" != "true" ]; then
+              echo "> [!WARNING]"; echo "> Validation failed; opened as draft. Fix before merging:"
+              echo '```'; cat "$RUNNER_TEMP/out/intent/$SLUG.errors"; echo '```'; echo
+            fi
+            if [ -n "$split" ] && [ "$(jq '.uncovered // [] | length' "$split")" != "0" ]; then
+              echo "<details><summary>Requirements in the document that no intent covers</summary>"; echo
+              jq -r '.uncovered[] | "- \(.)"' "$split"; echo; echo "</details>"
+            fi
+          } > "$RUNNER_TEMP/pr-body.md"
+          reviewer=${owner#@}; [[ "$reviewer" == */* ]] && reviewer=""   # teams are routed by intent-check
+          { echo "title=$title"; echo "reviewer=$reviewer"; } >> "$GITHUB_OUTPUT"
+
+      - name: Open the intent PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+          branch: intent/${{ matrix.item.slug }}
+          base: ${{ inputs.base_branch }}
+          add-paths: intent/${{ matrix.item.slug }}.md
+          commit-message: |
+            intent: ${{ steps.body.outputs.title }}
+
+            From a requirement document @ ${{ github.sha }}
+          title: "intent: ${{ steps.body.outputs.title }}"
+          body-path: ${{ runner.temp }}/pr-body.md
+          draft: ${{ matrix.item.valid != true }}
+          labels: |
+            intent
+            source:document
+          reviewers: ${{ steps.body.outputs.reviewer }}

@@ -13,7 +13,7 @@ Adopt it in a project in one command, **`/sdlc:init`**, then follow
 
 | Stage | Start it with | You get | Approved by |
 |---|---|---|---|
-| Plan | `/sdlc:write-intent`, or label a Jira ticket `intent` | `intent/<slug>.md` (+ a Jira Epic) | the owner merging the intent PR |
+| Plan | merge a requirement document into `requirements/` (or `/sdlc:write-intent`, or label a Jira ticket `intent`) | `intent/<slug>.md` (+ a Jira Epic) | the owner merging the intent PR |
 | Design | automatic when an intent merges | `specs/<slug>.md`: requirements, **stack decision**, stories; pre-screened by an adversarial reviewer | owner (+ tech lead for high risk); stories then appear in Jira |
 | UI design | automatic with the spec; `/sdlc:design-ui from=mockups` to refine in Figma | HTML mockups and a PNG of each screen in `designs/<slug>/` | owner merging the spec PR (or a design PR) |
 | Build | automatic after each merge (or `/sdlc:build-story <KEY>`) | per story: a plan PR, then CI builds it test-first with an independent verifier and opens the story PR | owner merging the plan PR |
