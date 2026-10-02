@@ -37,9 +37,9 @@ GRAPHIFY_VERSION = "0.9.71"
 PONYTAIL_REF = "v4.10.0"
 STAGES = ["plan", "design", "ui_design", "build", "pr_review", "test", "deploy", "maintain"]
 DEFAULT_MODELS = {"intake": "claude-sonnet-5", "spec": "claude-opus-5-5", "review": "claude-sonnet-5",
-                  "build": "claude-opus-5-5", "stack": "claude-sonnet-5"}
+                  "build": "claude-opus-5-5", "stack": "claude-sonnet-5", "requirements": "claude-opus-5-5"}
 BEGIN, END = "<!-- sdlc:begin -->", "<!-- sdlc:end -->"
-FOLDERS = ["intent", "specs", "designs", "plans", "releases", "runbooks"]
+FOLDERS = ["requirements", "intent", "specs", "designs", "plans", "releases", "runbooks"]
 GITIGNORE = [".sdlc-input/", ".sdlc-output/", ".sdlc-plugin/", "graphify-out/",
              ".claude/settings.local.json", ".claude/*.graphify-bak"]
 ALLOW = [
@@ -395,6 +395,12 @@ def render_callers(a):
             + "jobs:\n" + "\n".join(jobs))
 
     jobs = []
+    if s["plan"]:
+        # A requirement document committed to requirements/ becomes intent PRs.
+        jobs.append("  requirements:\n" + call(
+            a, "sdlc-requirements.yml",
+            extra_with=f"      model: {m['requirements']}\n      document: ${{{{ inputs.rerun == 'requirements' && inputs.file || '' }}}}\n",
+            if_expr="github.event_name == 'push' || inputs.rerun == 'requirements'"))
     if s["design"]:
         jobs.append("  intent-to-spec:\n" + call(
             a, "sdlc-intent-to-spec.yml",
@@ -430,14 +436,14 @@ def render_callers(a):
             # OIDC login to the cloud the spec chose (no long-lived keys).
             permissions="    permissions:\n      contents: read\n      id-token: write\n"))
     if jobs:
-        options = [o for o, on in (("intent-to-spec", s["design"]), ("spec-to-stories", s["design"]),
+        options = [o for o, on in (("requirements", s["plan"]), ("intent-to-spec", s["design"]), ("spec-to-stories", s["design"]),
                                    ("stack", auto_stack), ("build", auto_build), ("release", s["deploy"])) if on]
         files[".github/workflows/sdlc-push.yml"] = (
             header(a, "SDLC push", f"After a merge to {a['base_branch']}: the next stage for each merged artifact, and the tests.")
             + f"on:\n  push:\n    branches: [{a['base_branch']}]\n"
             + "  workflow_dispatch:\n    inputs:\n"
             + f"      rerun:\n        description: \"Re-run one step for one merged file\"\n        type: choice\n        options: [{', '.join(options)}]\n"
-            + "      file:\n        description: \"intent/<slug>.md, specs/<slug>.md or releases/<version>.md\"\n        required: true\n"
+            + "      file:\n        description: \"requirements/<file>, intent/<slug>.md, specs/<slug>.md or releases/<version>.md\"\n        required: true\n"
             + ("      allow_destroy:\n        description: \"release: apply an infrastructure plan that destroys or replaces resources (read the plan first)\"\n"
                "        type: boolean\n        default: false\n" if s["deploy"] else "")
             + "\n"
@@ -822,6 +828,18 @@ def latest_tag(repo, run=None):
     return max(tags, key=lambda t: tuple(int(x) for x in t[1:].split("."))) if tags else None
 
 
+REQUIREMENT_DOC_RE = re.compile(r"^requirements/[^/]+\.(md|txt|pdf)$", re.IGNORECASE)  # same rule as sdlc-requirements.yml
+
+
+def requirement_documents(root):
+    """Requirement documents in requirements/ (merging one starts the Plan stage)."""
+    folder = Path(root) / "requirements"
+    if not folder.is_dir():
+        return []
+    return sorted(p.relative_to(root).as_posix() for p in folder.iterdir()
+                  if p.is_file() and REQUIREMENT_DOC_RE.match(p.relative_to(root).as_posix()))
+
+
 def needed(answers):
     """Repo variables and secrets the chosen setup needs: {"variables": [...], "secrets": [...]}."""
     a = answers
@@ -862,6 +880,7 @@ def discover(root, run=None):
         # A subscription has usage limits: builds, the longest runs, use the lighter model.
         out["claude_auth"] = "subscription"
         out["models"] = {"build": "claude-sonnet-5"}
+    out["requirements"] = requirement_documents(root)
     need = needed(out)
     out["missing"] = ([v for v in need["variables"] if v not in variables] + [s for s in need["secrets"] if s not in secrets]
                       + ([] if set(need["one_of_secrets"]) & set(secrets) else ["ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"]))

@@ -165,7 +165,7 @@ class InitTest(unittest.TestCase):
         push = self.read(".github/workflows/sdlc-push.yml")
         self.assertIn("uses: bala-chimera/sdlc-marketplace/.github/workflows/sdlc-build.yml@v0.6.0", push)
         self.assertIn("inputs.rerun == 'build'", push)
-        self.assertIn("options: [intent-to-spec, spec-to-stories, stack, build, release]", push)
+        self.assertIn("options: [requirements, intent-to-spec, spec-to-stories, stack, build, release]", push)
         self.assertTrue(json.loads(self.read(".sdlc/sdlc.json"))["auto_build"])
         self.assertIn("a plan PR (reviewed for edge cases and bugs), then the build", self.read("CLAUDE.md"))
 
@@ -174,7 +174,7 @@ class InitTest(unittest.TestCase):
         push = self.read(".github/workflows/sdlc-push.yml")
         self.assertIn("sdlc-spec-to-stack.yml@v0.6.0", push)
         self.assertIn("spec_file: ${{ inputs.rerun == 'stack' && inputs.file || '' }}", push)
-        self.assertIn("options: [intent-to-spec, spec-to-stories, stack, build, release]", push)
+        self.assertIn("options: [requirements, intent-to-spec, spec-to-stories, stack, build, release]", push)
         self.assertIn("opens a stack PR", self.read("CLAUDE.md"))
         self.run_init({**ANSWERS, "stages": {"build": False}})
         self.assertNotIn("sdlc-spec-to-stack.yml", self.read(".github/workflows/sdlc-push.yml"))
@@ -269,6 +269,28 @@ class InitTest(unittest.TestCase):
             raise OSError("gh not found")
         found = ip.discover(self.root, broken)
         self.assertEqual((found["repo"], found["sdlc_ref"], found["base_branch"]), (None, None, "main"))
+
+    def test_requirement_documents_start_the_loop(self):
+        self.run_init()
+        self.assertTrue((self.root / "requirements" / ".gitkeep").is_file())
+        push = self.read(".github/workflows/sdlc-push.yml")
+        job = push.split("  requirements:\n", 1)[1].split("\n  intent-to-spec:", 1)[0]
+        self.assertIn("sdlc-requirements.yml@v0.6.0", job)
+        self.assertIn("document: ${{ inputs.rerun == 'requirements' && inputs.file || '' }}", job)
+        self.assertIn("model: claude-opus-5-5", job)
+        self.run_init({**ANSWERS, "stages": {"plan": False}})
+        self.assertNotIn("sdlc-requirements.yml", self.read(".github/workflows/sdlc-push.yml"))
+
+    def test_discover_lists_requirement_documents(self):
+        (self.root / "requirements").mkdir()
+        for name in ("shop-requirements.md", "brd.PDF", "notes.txt", ".gitkeep", "diagram.png"):
+            (self.root / "requirements" / name).write_text("x", encoding="utf-8")
+        (self.root / "requirements" / "old").mkdir()
+        (self.root / "requirements" / "old" / "x.md").write_text("x", encoding="utf-8")
+        (self.root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+        found = ip.discover(self.root, self.fake_gh())
+        self.assertEqual(found["requirements"], ["requirements/brd.PDF", "requirements/notes.txt",
+                                                 "requirements/shop-requirements.md"])
 
     def test_rerun_turns_jira_on(self):
         self.run_init({**ANSWERS, "jira": {"enabled": False}})

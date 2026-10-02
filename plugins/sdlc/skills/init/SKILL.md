@@ -66,12 +66,17 @@ Arguments: `$ARGUMENTS`
      the tech lead's call in the spec; do not invent one for a new repo.
    - The plugin tag to pin (default: `sdlc_ref` from `--discover`, the
      latest `v*` tag).
+   - **The requirement document**: `--discover`'s `requirements` lists the
+     documents already in `requirements/` (.md, .txt or .pdf). If there is
+     none, ask the person for theirs (a path on their computer), or whether
+     to start without one. The document is what starts the loop: merging
+     the setup PR with it turns it into intent PRs automatically.
    - Models: `--discover`'s `models` (lighter builds on a subscription).
 3. **Write the answers** to `.sdlc-output/init-answers.json` (include
    `"models"` when `--discover` suggested any):
 
    ```json
-   {"sdlc_ref": "v0.15.0", "base_branch": "main",
+   {"sdlc_ref": "v0.16.0", "base_branch": "main",
     "owners": {"product_owner": "@po", "service_owner": "@org/sre", "tech_lead": "@lead", "security_owner": "@lead"},
     "jira": {"enabled": true, "site": "acme.atlassian.net", "space_key": "ACM"},
     "stages": {"ui_design": false}, "auto_build": true,
@@ -80,11 +85,17 @@ Arguments: `$ARGUMENTS`
    ```
 4. **Branch and generate**: `git checkout -b sdlc/init`, then
    `python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --answers .sdlc-output/init-answers.json`.
-   Show the person the list of files it created or updated.
+   Show the person the list of files it created or updated. If the person
+   gave a requirement document, copy it into `requirements/` keeping its
+   file name (`cp "<their path>" requirements/`), and add it to the list.
 5. **Commit and PR**: stage exactly the files it listed (never `git add -A`),
    commit `sdlc: set up the SDLC loop (<tag>)`, push, and open a PR (with
    `gh`, or give the compare link). Tell the person the PR is a config
-   change for a platform or tech-lead review.
+   change for a platform or tech-lead review, and that **merging it starts
+   the loop**: the requirement document in `requirements/` becomes one
+   intent PR per intent (the `requirements` job of SDLC push), with nothing
+   to run by hand. Later documents work the same way: commit one to
+   `requirements/` in a PR and merge it.
 6. **Hand over the checklist** the script printed, starting with what is
    still missing: run `--discover` again and list its `missing` variables
    and secrets by name (a missing one stops that stage). Then the rest:

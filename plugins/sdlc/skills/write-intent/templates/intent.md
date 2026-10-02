@@ -2,7 +2,7 @@
 id: <short-slug>
 title: <short title>
 author: <name> (<team/role>)
-source: <human | jira | maintain | claude-security | claude-tag>
+source: <human | jira | maintain | claude-security | claude-tag | document>
 record_id: <JIRA-KEY, e.g. CLM-123, or none>
 fingerprint: <dedup key from a headless source, or none>
 owner: "<@github-handle or @org/team of the approver>"

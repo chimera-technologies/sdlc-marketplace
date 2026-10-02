@@ -24,7 +24,7 @@ REQUIRED_KEYS = [
     "owner_role", "risk", "systems", "created",
 ]
 ENUMS = {
-    "source": {"human", "jira", "maintain", "claude-security", "claude-tag"},
+    "source": {"human", "jira", "maintain", "claude-security", "claude-tag", "document"},
     "owner_role": {"product-owner", "service-owner"},
     "risk": {"low", "medium", "high"},
 }

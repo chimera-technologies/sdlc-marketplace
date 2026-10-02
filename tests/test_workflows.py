@@ -72,7 +72,7 @@ class WorkflowScriptTest(unittest.TestCase):
 
     def test_ci_review_steps_can_run_workflows(self):
         for wf, skill in (("sdlc-pr.yml", "review-story"), ("sdlc-intent-to-spec.yml", "review-spec"),
-                          ("sdlc-build.yml", "review-plan")):
+                          ("sdlc-build.yml", "review-plan"), ("sdlc-requirements.yml", "write-intent")):
             text = (ROOT / ".github" / "workflows" / wf).read_text(encoding="utf-8")
             step = text.split(f"/sdlc:{skill} mode=headless", 1)[1].split("--output-format", 1)[0]
             self.assertIn("Workflow", step, f"{wf}: {skill} needs the Workflow tool")
