@@ -42,8 +42,9 @@ Arguments: `$ARGUMENTS`
   `pyproject.toml`, `pom.xml`, `go.mod`, `*.csproj`, Dockerfiles, CI
   config) and the directories for the systems named in the intent. You
   need this to state the real stack and what the change touches.
-- Policy skills: always apply `sdlc:security-policy`. If a technology
-  standards, brand or UX skill is available, apply it too.
+- Policy skills: always apply `sdlc:security-policy`, and
+  `sdlc:infra-policy` when the change needs or touches infrastructure. If a
+  technology standards, brand or UX skill is available, apply it too.
 
 ## Step 2: write each section
 
@@ -64,10 +65,27 @@ Follow the template's headings exactly, in order.
     recommend one, and write "Decision needed from: tech lead".
   - If a standards skill exists, pick from its approved list; anything
     outside it goes under Areas of concern.
+  - **Where it runs** is part of the same decision, made the same way (what
+    the repo already uses, else options and "Decision needed from: tech
+    lead"): the **cloud** (AWS, Azure, GCP, or none), the **IaC tool**
+    (Terraform, or none), containers and orchestration (Docker, Kubernetes,
+    Helm, a managed service), the environments (staging, production), how
+    CI/CD authenticates (OIDC, never long-lived keys), where IaC state
+    lives, and the smoke test that proves a deploy worked. Never assume a
+    cloud the repo or the intent does not name. `/sdlc:init stack=` records
+    the accepted choice in `.sdlc/build.yaml` and `.sdlc/deploy.yaml`.
+  - Infrastructure work gets its own stories with testable criteria (for
+    example "terraform validate and checkov pass", "the staging smoke test
+    reaches /healthz over HTTPS"), marked "No UI" in the design. Put the
+    line `Infrastructure: yes` directly under the heading of every story
+    that creates or changes cloud resources, IaC, images, cluster
+    manifests or the pipeline: automatic Build holds those stories until
+    the cloud decision is recorded, and builds the others meanwhile.
 - **Design**: components, data flow, interfaces, rollout and rollback.
   Enough for an engineer to plan the build. No code.
 - **Security considerations**: one row per `sdlc:security-policy` rule
-  that applies (`SEC-<n>`), saying how the design satisfies it. Rules that
+  that applies (`SEC-<n>`), and per `sdlc:infra-policy` rule (`INF-<n>`)
+  when there is infrastructure, saying how the design satisfies it. Rules that
   don't apply may be left out, or listed as "No" with a reason.
 - **Open questions**: **every** Open question in the intent gets a row
   with Source `intent`, copied in its own words. Status is `answered` (only
@@ -98,7 +116,7 @@ short bullets beat paragraphs.
 | `record_id` | Copy the intent's `record_id` (its Jira Epic or ticket). The stories are created under it. |
 | `owner` | The intent's owner. Quote it: `"@org/team"`. |
 | `tech_lead` | The component's `tech_lead` in `.sdlc/owners.yaml`, else `default.tech_lead`. Required when risk is `high`. |
-| `risk` | Start from the intent's risk. Raise it if the design touches anything in the risk rubric (auth, payments, PII or regulated data, more than two systems, a public API contract, data migration, or a new technology). Never lower it. |
+| `risk` | Start from the intent's risk. Raise it if the design touches anything in the risk rubric (auth, payments, PII or regulated data, more than two systems, a public API contract, data migration, a new technology, or infrastructure under `sdlc:infra-policy` INF-1, INF-2, INF-5 or INF-7). Never lower it. |
 | `systems` | The intent's systems, plus any the design adds. |
 | `created` | Today, `YYYY-MM-DD`. |
 

@@ -4,6 +4,56 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.13.0 (2026-10-01)
+
+Infrastructure as code, containers and Kubernetes, on whichever cloud the
+architect chooses.
+
+- **The cloud is decided in the spec**, like the stack: `write-spec`'s
+  Technology and architecture section decides the cloud (AWS, Azure, GCP,
+  or none), the IaC tool, containers and orchestration, environments, OIDC
+  and state; `/sdlc:init stack=` records it in `.sdlc/deploy.yaml`
+  (`cloud`, `iac`, `iac_dir`, `iac_var_file`, `iac_backend_config`,
+  `smoke_command`). Nothing assumes a cloud the spec does not name.
+- **Release** (`sdlc-release.yml`, new input `allow_destroy`): OIDC login
+  per environment (`.github/actions/cloud-login`; identity in each GitHub
+  environment's variables, no long-lived keys). Terraform (`iac.py`):
+  staging plan and apply; the production plan runs in a reviewer-free
+  `production-plan` environment with a read-only identity, is shown in the
+  run, and **exactly that plan** is applied after the production approval.
+  A plan that destroys or replaces anything stops the release until a
+  person re-runs it with `allow_destroy`. `smoke_command` runs after each
+  deploy; a staging failure means production never runs.
+- **New `sdlc:infra-policy`** (INF-1..8: least privilege and OIDC, no public
+  admin ports, encryption, remote locked state and no secrets in IaC,
+  change safety, pinned non-root scanned images, Kubernetes workload
+  hardening, the pipeline as the only path to production), applied by
+  write-spec, review-spec, review-plan and review-story with SEC rules.
+  Specs may cite INF rows in Security considerations.
+- **Risk rubric**: IAM, network exposure, data stores, IaC state, destroy or
+  replace, and the production pipeline are `high`.
+- **Toolchains**: `terraform@`, `helm@`, `kubectl@` built into setup-stack.
+  `init --detect` reports Terraform, Dockerfiles, Helm charts and Kubernetes
+  manifests with suggested tools, checks and code paths (never a cloud).
+- **Build**: never applies infrastructure (blocked commands, no cloud
+  credentials); Graphify does not index `.tf`/YAML, so build-story reads
+  those files directly.
+- **Infrastructure stories wait for the cloud decision**: the spec marks
+  them `Infrastructure: yes`; automatic Build holds them until
+  `.sdlc/deploy.yaml` records a cloud, an IaC tool or a deploy_command, and
+  builds the application stories meanwhile (still one story per spec in
+  flight).
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.13.0`. The release caller now grants
+  `id-token: write` and has an `allow_destroy` re-run input.
+- Projects with a cloud: create the `production-plan` environment and set
+  each environment's OIDC variables (see the init checklist); configure the
+  cloud to trust this repo's GitHub OIDC tokens.
+- `.sdlc/deploy.yaml` from earlier versions keeps working (new keys default
+  to none); run `/sdlc:init stack=specs/<slug>.md` to record a cloud.
+
 ## v0.12.0 (2026-10-01)
 
 What the plan review finds now gets fixed in the story, not just reported.

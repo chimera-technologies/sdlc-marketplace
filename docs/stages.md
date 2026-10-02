@@ -66,7 +66,9 @@ Jira ticket / document / breach
   the build runs in CI and opens the story PR (a draft if incomplete);
   story PR merged -> the next story. One story per spec in flight; a closed
   plan or story PR stops that spec until someone re-runs it. Nothing starts
-  until `.sdlc/build.yaml` has a `test_command`. The build may not change
+  until `.sdlc/build.yaml` has a `test_command`; stories the spec marks
+  `Infrastructure: yes` also wait until `.sdlc/deploy.yaml` records where it
+  runs (cloud, IaC or deploy_command), while the others go ahead. The build may not change
   `.github/`, `.sdlc/`, `specs/`, `plans/` or other SDLC files (hook, and
   reverted before the PR). Works with or without Jira (branches
   `story/<jira-key>-<name>` or `story/<spec-slug>-s<n>`). With Jira, the
@@ -80,6 +82,13 @@ Jira ticket / document / breach
 - **Test**: tests run only after the review gate; the project's own test
   command from `.sdlc/build.yaml`, on its own toolchain.
 - **Deploy**: a validated release record; production needs a named human
-  approval (GitHub environment reviewers); rollback is a new record.
+  approval (GitHub environment reviewers); rollback is a new record. On the
+  cloud the spec chose (AWS, Azure, GCP; OIDC, no long-lived keys):
+  Terraform is planned and applied on staging, the production plan is shown
+  to the approvers and exactly that plan is applied; anything destroyed or
+  replaced stops the release until a person re-runs it with
+  `allow_destroy`; `smoke_command` after each deploy, and a staging failure
+  means production never runs. `sdlc:infra-policy` (INF rules) applies to
+  every spec, plan and PR that touches infrastructure.
 - **Maintain**: checks are plain commands in any language; breaches become
   intents, deduplicated; triage chooses rollback (runbook) or fix (story).

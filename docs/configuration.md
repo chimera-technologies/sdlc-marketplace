@@ -89,6 +89,10 @@ flags is tuned in `REVIEW.md`.
 | Key | Default | Meaning |
 |---|---|---|
 | `version_scheme` | `semver` | Tags `vMAJOR.MINOR.PATCH` |
+| `cloud` | `none` | `aws`, `azure` or `gcp`: the architect's choice in the spec; OIDC login per environment |
+| `iac`, `iac_dir`, `iac_var_file`, `iac_backend_config` | `none`, `infra`, empty, empty | `terraform`: plan and apply per environment (`{env}` in the file paths); destroy or replace stops the release unless re-run with `allow_destroy` |
+| `smoke_command` | empty | Run after each deploy with `SMOKE_URL`; a failure stops the release |
+| `production_plan_environment` | `production-plan` | Reviewer-free environment with a read-only identity, for the production plan the approvers see |
 | `deploy_command` | empty | Run per environment with `SDLC_ENV`, `SDLC_VERSION`, `SDLC_COMMIT`, `DEPLOY_TOKEN` (secret) and `DEPLOY_TARGET` (variable); empty = tag and GitHub release only |
 | `staging_environment` | `staging` | Deployed automatically; empty = no staging |
 | `production_environment` | `production` | Give it required reviewers (the release manager) |
@@ -117,4 +121,6 @@ check without sending anything: `python <plugin>/skills/triage/scripts/run_check
 | `JIRA_BASE_URL`, `JIRA_USER_EMAIL` | variables | Jira (if enabled) |
 | `JIRA_API_TOKEN` | secret | Jira (if enabled) |
 | `DEPLOY_TOKEN` / `DEPLOY_TARGET` | secret / variable, per environment | `deploy_command` |
+| `AWS_ROLE_ARN`, `AWS_REGION` / `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` / `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT` | variables on each environment (`staging`, `production-plan` with a read-only identity, `production`) | OIDC cloud login in releases, for the `cloud` in `.sdlc/deploy.yaml` |
+| `SMOKE_URL` | variable, per environment | `smoke_command` |
 | `FIGMA_TOKEN` | environment variable on the designer's machine | PNG export after refining the mockups in Figma (not needed for the automatic mockups) |

@@ -1,0 +1,96 @@
+name: SDLC cloud login
+description: >-
+  Log in to the cloud the spec's architect chose (.sdlc/deploy.yaml cloud:
+  aws, azure or gcp) with short-lived OIDC credentials: no long-lived keys.
+  The identity is per GitHub environment (staging, production-plan,
+  production): the calling job passes that environment's variables. The job
+  needs `permissions: id-token: write`. cloud none = nothing to do.
+
+inputs:
+  cloud:
+    description: "none | aws | azure | gcp"
+    required: true
+  aws-role-arn:
+    description: "vars.AWS_ROLE_ARN of the environment"
+    default: ""
+  aws-region:
+    description: "vars.AWS_REGION of the environment"
+    default: ""
+  azure-client-id:
+    description: "vars.AZURE_CLIENT_ID of the environment"
+    default: ""
+  azure-tenant-id:
+    description: "vars.AZURE_TENANT_ID of the environment"
+    default: ""
+  azure-subscription-id:
+    description: "vars.AZURE_SUBSCRIPTION_ID of the environment"
+    default: ""
+  gcp-workload-identity-provider:
+    description: "vars.GCP_WORKLOAD_IDENTITY_PROVIDER of the environment"
+    default: ""
+  gcp-service-account:
+    description: "vars.GCP_SERVICE_ACCOUNT of the environment"
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Check the environment's cloud identity
+      shell: bash
+      env:
+        CLOUD: ${{ inputs.cloud }}
+        AWS_ROLE: ${{ inputs.aws-role-arn }}
+        AWS_REG: ${{ inputs.aws-region }}
+        AZ_CLIENT: ${{ inputs.azure-client-id }}
+        AZ_TENANT: ${{ inputs.azure-tenant-id }}
+        AZ_SUB: ${{ inputs.azure-subscription-id }}
+        GCP_WIP: ${{ inputs.gcp-workload-identity-provider }}
+        GCP_SA: ${{ inputs.gcp-service-account }}
+      run: |
+        set -euo pipefail
+        missing=()
+        case "$CLOUD" in
+          none) exit 0 ;;
+          aws) [ -n "$AWS_ROLE" ] || missing+=(AWS_ROLE_ARN); [ -n "$AWS_REG" ] || missing+=(AWS_REGION) ;;
+          azure) [ -n "$AZ_CLIENT" ] || missing+=(AZURE_CLIENT_ID); [ -n "$AZ_TENANT" ] || missing+=(AZURE_TENANT_ID); [ -n "$AZ_SUB" ] || missing+=(AZURE_SUBSCRIPTION_ID) ;;
+          gcp) [ -n "$GCP_WIP" ] || missing+=(GCP_WORKLOAD_IDENTITY_PROVIDER); [ -n "$GCP_SA" ] || missing+=(GCP_SERVICE_ACCOUNT) ;;
+          *) echo "::error::unknown cloud '$CLOUD' (none, aws, azure, gcp)"; exit 1 ;;
+        esac
+        if [ "${#missing[@]}" -gt 0 ]; then
+          echo "::error::set these variables on the GitHub environment ($CLOUD OIDC identity): ${missing[*]}"
+          exit 1
+        fi
+
+    - if: inputs.cloud == 'aws'
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - if: inputs.cloud == 'azure'
+      uses: azure/login@v2
+      with:
+        client-id: ${{ inputs.azure-client-id }}
+        tenant-id: ${{ inputs.azure-tenant-id }}
+        subscription-id: ${{ inputs.azure-subscription-id }}
+
+    - name: Terraform azurerm uses the same OIDC identity
+      if: inputs.cloud == 'azure'
+      shell: bash
+      env:
+        AZ_CLIENT: ${{ inputs.azure-client-id }}
+        AZ_TENANT: ${{ inputs.azure-tenant-id }}
+        AZ_SUB: ${{ inputs.azure-subscription-id }}
+      run: |
+        {
+          echo "ARM_USE_OIDC=true"
+          echo "ARM_CLIENT_ID=$AZ_CLIENT"
+          echo "ARM_TENANT_ID=$AZ_TENANT"
+          echo "ARM_SUBSCRIPTION_ID=$AZ_SUB"
+        } >> "$GITHUB_ENV"
+
+    - if: inputs.cloud == 'gcp'
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
+        service_account: ${{ inputs.gcp-service-account }}

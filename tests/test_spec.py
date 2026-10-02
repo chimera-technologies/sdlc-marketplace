@@ -95,7 +95,12 @@ class ValidateSpecTest(RepoCase):
 
     def test_security_needs_sec_rows(self):
         _, errors, _ = self.check(self.spec_text.replace("| SEC-", "| RULE-"))
-        self.assertError(errors, "'| SEC-<n> | ... |' row")
+        self.assertError(errors, "needs at least one '| SEC-<n> | ... |' or '| INF-<n> | ... |' row")
+
+    def test_infra_policy_rows_count(self):
+        # An infrastructure-only spec may cite only infra-policy rules.
+        _, errors, _ = self.check(self.spec_text.replace("| SEC-", "| INF-"))
+        self.assertFalse(any("Security considerations" in e for e in errors), errors)
 
     def test_stories_need_acceptance_criteria(self):
         text = self.spec_text.replace(

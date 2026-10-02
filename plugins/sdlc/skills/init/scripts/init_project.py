@@ -217,12 +217,30 @@ def render_review(a):
     }, indent=2) + "\n"
 
 
+def yaml_line(key, val, comment):
+    """`key: value` padded to column 39, then `# comment` (at least one space)."""
+    return f"{f'{key}: {val}'.rstrip().ljust(38)} # {comment}\n"
+
+
 def render_deploy(a):
+    d = a.get("deploy") or {}
+    rows = [
+        ("version_scheme", "semver", "releases are tagged vMAJOR.MINOR.PATCH"),
+        ("deploy_command", d.get("deploy_command", ""), "app deploy per environment (SDLC_ENV set); empty = none"),
+        ("smoke_command", d.get("smoke_command", ""), "after each deploy (SMOKE_URL from the environment); failure stops the release"),
+        ("staging_environment", "staging", "GitHub environment deployed automatically; empty = none"),
+        ("production_plan_environment", "production-plan", "no reviewers; read-only cloud identity for the production plan"),
+        ("production_environment", "production", "GitHub environment with required reviewers (the release manager)"),
+        ("cloud", d.get("cloud", "none"), "none, aws, azure or gcp (OIDC login; identity in each environment's variables)"),
+        ("iac", d.get("iac", "none"), "none or terraform (plan, then apply the approved plan)"),
+        ("iac_dir", d.get("iac_dir", "infra"), "where the IaC lives"),
+        ("iac_var_file", d.get("iac_var_file", ""), "relative to iac_dir, {env} = staging/production"),
+        ("iac_backend_config", d.get("iac_backend_config", ""), "relative to iac_dir, {env} = staging/production"),
+    ]
     return ("# Deploy stage, read by /sdlc:release and the release workflow.\n"
-            "version_scheme: semver                 # releases are tagged vMAJOR.MINOR.PATCH\n"
-            "deploy_command:                        # run per environment with SDLC_ENV set; empty = tag + release record only\n"
-            "staging_environment: staging           # GitHub environment deployed automatically; empty = none\n"
-            "production_environment: production     # GitHub environment with required reviewers (the release manager)\n")
+            "# The cloud and the IaC tool are the architect's decision in the spec;\n"
+            "# /sdlc:init stack=specs/<slug>.md records them. Commands must not contain '#'.\n"
+            + "".join(yaml_line(*r) for r in rows))
 
 
 def render_maintain(a):
@@ -331,7 +349,7 @@ def secrets_block(indent="    ", extra=()):
     return f"{indent}secrets:\n" + "".join(f"{indent}  {n}: ${{{{ secrets.{n} }}}}\n" for n in names)
 
 
-def call(a, workflow, extra_with="", if_expr="", extra_secrets=()):
+def call(a, workflow, extra_with="", if_expr="", extra_secrets=(), permissions=""):
     with_lines = (f"      sdlc_ref: {a['sdlc_ref']}\n"
                   f"      sdlc_repo: {a['sdlc_repo']}\n"
                   "      app_id: ${{ vars.SDLC_APP_ID }}\n"
@@ -339,6 +357,7 @@ def call(a, workflow, extra_with="", if_expr="", extra_secrets=()):
                   "      jira_base_url: ${{ vars.JIRA_BASE_URL }}\n"
                   "      jira_user_email: ${{ vars.JIRA_USER_EMAIL }}\n" + extra_with)
     cond = f"    if: {if_expr}\n" if if_expr else ""
+    cond += permissions
     return (f"{cond}    uses: {a['sdlc_repo']}/.github/workflows/{workflow}@{a['sdlc_ref']}\n"
             f"    with:\n{with_lines}" + secrets_block(extra=extra_secrets))
 
@@ -393,9 +412,12 @@ def render_callers(a):
     if s["deploy"]:
         jobs.append("  release:\n" + call(
             a, "sdlc-release.yml",
-            extra_with="      release_file: ${{ inputs.rerun == 'release' && inputs.file || '' }}\n",
+            extra_with=("      release_file: ${{ inputs.rerun == 'release' && inputs.file || '' }}\n"
+                        "      allow_destroy: ${{ inputs.rerun == 'release' && inputs.allow_destroy || false }}\n"),
             if_expr="github.event_name == 'push' || inputs.rerun == 'release'",
-            extra_secrets=("DEPLOY_TOKEN",)))
+            extra_secrets=("DEPLOY_TOKEN",),
+            # OIDC login to the cloud the spec chose (no long-lived keys).
+            permissions="    permissions:\n      contents: read\n      id-token: write\n"))
     if jobs:
         options = [o for o, on in (("intent-to-spec", s["design"]), ("spec-to-stories", s["design"]),
                                    ("build", auto_build), ("release", s["deploy"])) if on]
@@ -404,7 +426,10 @@ def render_callers(a):
             + f"on:\n  push:\n    branches: [{a['base_branch']}]\n"
             + "  workflow_dispatch:\n    inputs:\n"
             + f"      rerun:\n        description: \"Re-run one step for one merged file\"\n        type: choice\n        options: [{', '.join(options)}]\n"
-            + "      file:\n        description: \"intent/<slug>.md, specs/<slug>.md or releases/<version>.md\"\n        required: true\n\n"
+            + "      file:\n        description: \"intent/<slug>.md, specs/<slug>.md or releases/<version>.md\"\n        required: true\n"
+            + ("      allow_destroy:\n        description: \"release: apply an infrastructure plan that destroys or replaces resources (read the plan first)\"\n"
+               "        type: boolean\n        default: false\n" if s["deploy"] else "")
+            + "\n"
             + "permissions:\n  contents: read\n\n"
             + "jobs:\n" + "\n".join(jobs))
 
@@ -581,6 +606,57 @@ def detect(root):
     return {}
 
 
+INFRA_SKIP = {".git", "node_modules", ".terraform", ".venv", ".sdlc-plugin", "dist", "build", "target"}
+
+
+def _files(root, pattern):
+    return [p for p in root.rglob(pattern) if not INFRA_SKIP & set(p.relative_to(root).parts)]
+
+
+def detect_infra(root):
+    """Infrastructure found in the repo: Terraform, Dockerfiles, Helm charts, Kubernetes manifests.
+
+    Returns {"found": [...], "toolchains": [...], "checks": [...], "code_paths": [...], "deploy": {...}}
+    as suggestions for the person and the spec's architect; nothing here is decided.
+    """
+    root = Path(root)
+    out = {"found": [], "toolchains": [], "checks": [], "code_paths": [], "deploy": {}}
+    tf = _files(root, "*.tf")
+    if tf:
+        tf_dirs = sorted({p.parent.relative_to(root).as_posix() for p in tf})
+        top = sorted({d.split("/")[0] for d in tf_dirs})
+        out["found"].append(f"Terraform in {', '.join(tf_dirs)}")
+        out["toolchains"].append("terraform@1.9.8")
+        out["checks"] += ["terraform fmt -check -recursive", "terraform -chdir={dir} init -backend=false",
+                          "terraform -chdir={dir} validate", "tflint --recursive", "checkov -d {dir} --quiet"]
+        out["code_paths"] += [f"{d}/" for d in top if d != "."]
+        out["deploy"] = {"iac": "terraform", "iac_dir": top[0] if top[0] != "." else "."}
+    docker = _files(root, "Dockerfile") + _files(root, "*.Dockerfile")
+    if docker:
+        out["found"].append(f"Dockerfile: {', '.join(p.relative_to(root).as_posix() for p in docker)}")
+        out["checks"] += ["docker build --pull -t app:ci .", "trivy image --exit-code 1 --severity CRITICAL,HIGH app:ci"]
+        out["code_paths"] += [p.relative_to(root).as_posix() for p in docker]
+    charts = _files(root, "Chart.yaml")
+    if charts:
+        dirs = [p.parent.relative_to(root).as_posix() for p in charts]
+        out["found"].append(f"Helm chart: {', '.join(dirs)}")
+        out["toolchains"].append("helm@3.16.2")
+        out["checks"] += [f"helm lint {d}" for d in dirs]
+        out["code_paths"] += [f"{d}/" for d in dirs]
+    manifests = [p for p in _files(root, "*.yaml") + _files(root, "*.yml")
+                 if p.name not in ("Chart.yaml",) and ".github" not in p.parts and ".sdlc" not in p.parts
+                 and "apiVersion:" in p.read_text(encoding="utf-8", errors="replace")[:2000]
+                 and "kind:" in p.read_text(encoding="utf-8", errors="replace")[:2000]]
+    if manifests:
+        dirs = sorted({p.parent.relative_to(root).as_posix() for p in manifests})
+        out["found"].append(f"Kubernetes manifests in {', '.join(dirs)}")
+        out["toolchains"].append("kubectl@1.31.0")
+        out["checks"] += [f"kubeconform -strict -summary {d}" for d in dirs]
+        out["code_paths"] += [f"{d}/" for d in dirs if d != "."]
+    out["code_paths"] = sorted(set(out["code_paths"]))
+    return out
+
+
 def set_stack(root, stack):
     """Rewrite only the stack keys of .sdlc/build.yaml (the rest is kept)."""
     path = Path(root) / ".sdlc" / "build.yaml"
@@ -598,14 +674,44 @@ def set_stack(root, stack):
         values["test_paths"] = yaml_list(stack["test_paths"])
     if stack.get("code_paths"):
         values["code_paths"] = yaml_list(stack["code_paths"])
-    for key, val in values.items():
-        if "#" in val:
-            raise SystemExit(f"stack.{key} must not contain '#'")
-        pat = re.compile(rf"^{key}:.*$", re.MULTILINE)
-        line = f"{key}: {val}".rstrip()
-        text = pat.sub(line, text) if pat.search(text) else text.rstrip("\n") + f"\n{line}\n"
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_lf(path, text)
+    write_lf(path, set_keys(text, values, "stack"))
+    if stack.get("deploy"):
+        set_deploy(root, stack["deploy"])
+    return path
+
+
+DEPLOY_KEYS = ["cloud", "iac", "iac_dir", "iac_var_file", "iac_backend_config", "deploy_command", "smoke_command"]
+CLOUDS, IACS = ("none", "aws", "azure", "gcp"), ("none", "terraform")
+
+
+def set_keys(text, values, what):
+    """Replace `key: ...` lines (keeping their comments) or append them."""
+    for key, val in values.items():
+        val = str(val)
+        if "#" in val:
+            raise SystemExit(f"{what}.{key} must not contain '#'")
+        pat = re.compile(rf"^{key}:[^#\n]*(#.*)?$", re.MULTILINE)
+        m = pat.search(text)
+        line = f"{key}: {val}".rstrip()
+        if m:
+            comment = m.group(1)
+            text = text[:m.start()] + (f"{line.ljust(38)} {comment}" if comment else line) + text[m.end():]
+        else:
+            text = text.rstrip("\n") + f"\n{line}\n"
+    return text
+
+
+def set_deploy(root, deploy):
+    """Record the spec's cloud and IaC decision in .sdlc/deploy.yaml (other keys kept)."""
+    if deploy.get("cloud", "none") not in CLOUDS:
+        raise SystemExit(f"deploy.cloud must be one of {', '.join(CLOUDS)}")
+    if deploy.get("iac", "none") not in IACS:
+        raise SystemExit(f"deploy.iac must be one of {', '.join(IACS)}")
+    path = Path(root) / ".sdlc" / "deploy.yaml"
+    text = path.read_text(encoding="utf-8") if path.is_file() else render_deploy({})
+    values = {k: deploy[k] for k in DEPLOY_KEYS if k in deploy}
+    write_lf(path, set_keys(text, values, "deploy"))
     return path
 
 
@@ -631,8 +737,12 @@ def checklist(a):
                      "     https://api.github.com/repos/<owner>/<this repo>/dispatches with\n"
                      "     {\"event_type\":\"create-intent\",\"client_payload\":{\"source\":\"jira\",\"record_id\":\"{{issue.key}}\"}}")
     if a["stages"]["deploy"]:
-        extra.append("  6. Environments: create 'staging' and 'production' (Settings > Environments);\n"
-                     "     give production required reviewers (the release manager).")
+        extra.append("  6. Environments: create 'staging', 'production-plan' and 'production' (Settings > Environments);\n"
+                     "     give production required reviewers (the release manager). When the spec picks a cloud,\n"
+                     "     set each environment's OIDC identity as environment variables (production-plan: a\n"
+                     "     read-only identity): AWS_ROLE_ARN, AWS_REGION | AZURE_CLIENT_ID, AZURE_TENANT_ID,\n"
+                     "     AZURE_SUBSCRIPTION_ID | GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT; and SMOKE_URL\n"
+                     "     for smoke tests. The cloud must trust this repo's GitHub OIDC tokens for that environment.")
     if a["stages"]["ui_design"]:
         extra.append("  7. UI design: mockups come with every spec PR. To refine them in Figma, a designer\n"
                      "     logs in (/mcp), sets FIGMA_TOKEN, and runs /sdlc:design-ui from=mockups.")
@@ -661,11 +771,17 @@ def main():
     root = Path(args.root)
 
     if args.detect:
-        print(json.dumps(detect(root), indent=2))
+        found = detect(root)
+        infra = detect_infra(root)
+        if infra["found"]:
+            found["infra"] = infra
+        print(json.dumps(found, indent=2))
         return 0
     if args.stack:
-        path = set_stack(root, json.loads(Path(args.stack).read_text(encoding="utf-8")))
-        print(f"recorded the stack in {path.as_posix()}")
+        stack = json.loads(Path(args.stack).read_text(encoding="utf-8"))
+        path = set_stack(root, stack)
+        print(f"recorded the stack in {path.as_posix()}"
+              + (" and the cloud and IaC in .sdlc/deploy.yaml" if stack.get("deploy") else ""))
         return 0
     if args.check:
         problems = check(root)

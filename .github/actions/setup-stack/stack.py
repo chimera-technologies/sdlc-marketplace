@@ -6,7 +6,7 @@ Writes GitHub Actions step outputs (to $GITHUB_OUTPUT, or prints them):
   setup_command, install_command, test_command, test_file_command
 
 build.yaml keys (all optional except test_command for the Test stage):
-  toolchains: [node@22, python@3.12, java@21, dotnet@8.0, go@1.23]
+  toolchains: [node@22, python@3.12, java@21, dotnet@8.0, go@1.23, terraform@1.9.8, helm@3.16.2, kubectl@1.31.0]
   java_distribution: temurin          # setup-java distribution (default temurin)
   setup_command: <anything else to install, e.g. a Rust or Ruby toolchain>
   install_command: npm ci && npx playwright install --with-deps chromium
@@ -22,7 +22,9 @@ import os
 import sys
 from pathlib import Path
 
-SUPPORTED = ["node", "python", "java", "dotnet", "go"]
+# Infrastructure tools are toolchains too: the spec decides which.
+SUPPORTED = ["node", "python", "java", "dotnet", "go", "terraform", "helm", "kubectl"]
+V_PREFIXED = {"helm", "kubectl"}   # their setup actions want v1.2.3
 KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path"]
 
 
@@ -54,7 +56,8 @@ def read_stack(root):
         if not version.strip():
             errors.append(f"toolchain {item!r} needs a version, e.g. {name}@<version>")
             continue
-        out[name] = version.strip()
+        version = version.strip()
+        out[name] = f"v{version.lstrip('v')}" if name in V_PREFIXED else version
     for k in KEYS:
         out[k] = cfg.get(k, "") or ""
     return out, errors

@@ -477,7 +477,7 @@ jobs:
             --max-turns 250 \
             --strict-mcp-config \
             --allowedTools "Read,Glob,Grep,Write,Edit,MultiEdit,Bash,Task,Agent" \
-            --disallowedTools "Bash(git push*),Bash(gh *),Bash(curl *),Bash(wget *)" \
+            --disallowedTools "Bash(git push*),Bash(gh *),Bash(curl *),Bash(wget *),Bash(terraform apply*),Bash(terraform destroy*),Bash(kubectl apply*),Bash(kubectl delete*),Bash(helm install*),Bash(helm upgrade*),Bash(helm uninstall*)" \
             --output-format stream-json --verbose \
             > "$RUNNER_TEMP/build-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/build-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true

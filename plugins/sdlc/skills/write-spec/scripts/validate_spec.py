@@ -46,7 +46,7 @@ SECTIONS = [
 MUST_BE_REAL = ["Summary", "Requirements", "Technology and architecture", "Design", "Work breakdown"]
 OQ_STATUSES = {"answered", "carried forward", "open"}
 REQ_ROW_RE = re.compile(r"^\|\s*REQ-\d+\s*\|", re.MULTILINE)
-SEC_ROW_RE = re.compile(r"^\|\s*SEC-\d", re.MULTILINE)
+SEC_ROW_RE = re.compile(r"^\|\s*(SEC|INF)-\d", re.MULTILINE)  # security-policy or infra-policy rule
 OQ_ROW_RE = re.compile(r"^\|\s*OQ-\d+\s*\|(.*)$", re.MULTILINE)
 STORY_RE = re.compile(r"^###\s+(S\d+):\s*(\S.*?)\s*$", re.MULTILINE)
 MAX_WORDS = 2000
@@ -152,7 +152,7 @@ def validate(path, owners=None, root="."):
     if "Requirements" in sections and not REQ_ROW_RE.search(sections["Requirements"]):
         errors.append("section 'Requirements' needs at least one '| REQ-<n> | ... |' row")
     if "Security considerations" in sections and not SEC_ROW_RE.search(sections["Security considerations"]):
-        errors.append("section 'Security considerations' needs at least one '| SEC-<n> | ... |' row (use the security-policy skill)")
+        errors.append("section 'Security considerations' needs at least one '| SEC-<n> | ... |' or '| INF-<n> | ... |' row (security-policy, infra-policy)")
 
     oq_rows = [r.group(1) for r in OQ_ROW_RE.finditer(sections.get("Open questions", ""))]
     from_intent = 0

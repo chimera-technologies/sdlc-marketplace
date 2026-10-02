@@ -1,7 +1,8 @@
 name: SDLC setup stack
 description: >-
   Install the toolchains declared in the project's .sdlc/build.yaml
-  (node, python, java, dotnet, go) with the official setup actions, run its
+  (node, python, java, dotnet, go, terraform, helm, kubectl) with the
+  official setup actions, run its
   setup_command and install_command, and expose its test commands. The
   stack is whatever the spec's tech lead decided; nothing here is fixed.
   Used by the sdlc reusable workflows after they check out the plugin into
@@ -62,6 +63,22 @@ runs:
       uses: actions/setup-go@v5
       with:
         go-version: ${{ steps.stack.outputs.go }}
+
+    - if: steps.stack.outputs.terraform != ''
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ steps.stack.outputs.terraform }}
+        terraform_wrapper: false   # plain stdout, so `terraform show -json` parses
+
+    - if: steps.stack.outputs.helm != ''
+      uses: azure/setup-helm@v4
+      with:
+        version: ${{ steps.stack.outputs.helm }}
+
+    - if: steps.stack.outputs.kubectl != ''
+      uses: azure/setup-kubectl@v4
+      with:
+        version: ${{ steps.stack.outputs.kubectl }}
 
     - name: Setup command
       if: steps.stack.outputs.setup_command != ''
