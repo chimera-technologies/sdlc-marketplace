@@ -4,6 +4,31 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.15.0 (2026-10-02)
+
+`/sdlc:init` finds what is already set up and configures itself.
+
+- **New `init_project.py --discover`** (read-only, via `gh`): the repo and
+  default branch, the latest plugin tag, the signed-in user (default
+  owner), the repo's variables and secret names (never values), the Jira
+  site from `JIRA_BASE_URL`, the Claude login (API key or subscription;
+  on a subscription builds default to `claude-sonnet-5`), and the
+  variables and secrets the setup still needs (`missing`).
+- **The init skill uses it**: Jira is on whenever a site is found or the
+  Atlassian MCP is connected (one Jira space = used; several = the person
+  picks); it asks only what it could not find, and ends by listing what is
+  still missing. Jira is never left off because a question was skipped.
+- **Re-running init updates `jira.yaml`** when the Jira answer differs
+  (turning Jira on, a new site or space); other `.sdlc/*` config is kept.
+- Fix: `--upgrade` and `--check` read Jira from `jira.yaml` instead of
+  assuming it is off.
+
+### Upgrading
+
+- A repo set up with Jira off by mistake: run `/sdlc:init` again (it finds
+  the Jira site and space) and merge the PR. Or `/sdlc:init upgrade=v0.15.0`
+  to only move the pin.
+
 ## v0.14.0 (2026-10-02)
 
 Recording the stack is automatic: merging a spec opens the stack PR.

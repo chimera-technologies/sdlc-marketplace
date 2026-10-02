@@ -69,6 +69,7 @@ def write_lf(path, text):
 def normalize(answers):
     """Fill defaults and validate. Returns (answers, errors)."""
     a = json.loads(json.dumps(answers))  # deep copy
+    a["_given"] = sorted(answers)  # what the person answered, before defaults
     errors = []
     a.setdefault("sdlc_repo", DEFAULT_REPO)
     a.setdefault("base_branch", "main")
@@ -523,6 +524,14 @@ def plan_files(root, a, force=False):
     for rel, content in once.items():
         if force or not (root / rel).is_file():
             out[rel] = (content, "once")
+    # jira.yaml follows the answers: re-running init with Jira on (or a new
+    # site or space) updates it instead of keeping an old "enabled: false".
+    jira_path = root / ".sdlc" / "jira.yaml"
+    if ".sdlc/jira.yaml" not in out and "jira" in answers_given(a) and jira_path.is_file():
+        have = jira_settings(jira_path.read_text(encoding="utf-8"))
+        want = jira_settings(once[".sdlc/jira.yaml"])
+        if have != want:
+            out[".sdlc/jira.yaml"] = (once[".sdlc/jira.yaml"], "once")
     for rel, content in render_callers(a).items():
         out[rel] = (content, "managed")
     claude = root / "CLAUDE.md"
@@ -571,9 +580,14 @@ def check(root):
 
 
 def existing_answers(root):
-    """Recover the owners and stack from the committed config, for --check and --upgrade."""
+    """Recover the owners, stack and Jira settings from the committed config, for --check and --upgrade."""
     root = Path(root)
     a = {"owners": {}, "stack": {}, "jira": {"enabled": False}}
+    jira = root / ".sdlc" / "jira.yaml"
+    if jira.is_file():
+        # Read what is there (never assume off): an upgrade must not change Jira.
+        enabled, site, space = jira_settings(jira.read_text(encoding="utf-8"))
+        a["jira"] = {"enabled": enabled, "site": site, "space_key": space} if enabled else {"enabled": False}
     ow = root / ".sdlc" / "owners.yaml"
     if ow.is_file():
         text = ow.read_text(encoding="utf-8")
@@ -765,6 +779,95 @@ def set_keys(text, values, what):
     return text
 
 
+def jira_settings(text):
+    """(enabled, site, space_key) from a jira.yaml text."""
+    vals = {}
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if ":" in line:
+            k, _, v = line.partition(":")
+            vals[k.strip()] = v.strip().strip("'\"")
+    return (vals.get("enabled", "false").lower() == "true", vals.get("site", ""), vals.get("space_key", ""))
+
+
+def answers_given(a):
+    """Keys the person actually answered (normalize() fills defaults in place)."""
+    return a.get("_given", set(a))
+
+
+def gh_json(args, root, run=None):
+    """`gh <args>` parsed as JSON, or None when gh is missing, not signed in or fails."""
+    import subprocess
+    run = run or subprocess.run
+    try:
+        r = run(["gh", *args], cwd=root, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        return json.loads(r.stdout or "null")
+    except ValueError:
+        return None
+
+
+def latest_tag(repo, run=None):
+    import subprocess
+    run = run or subprocess.run
+    try:
+        r = run(["git", "ls-remote", "--tags", f"https://github.com/{repo}"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    tags = re.findall(r"refs/tags/(v\d+\.\d+\.\d+)$", r.stdout or "", re.MULTILINE)
+    return max(tags, key=lambda t: tuple(int(x) for x in t[1:].split("."))) if tags else None
+
+
+def needed(answers):
+    """Repo variables and secrets the chosen setup needs: {"variables": [...], "secrets": [...]}."""
+    a = answers
+    variables, secrets = ["SDLC_APP_ID"], ["SDLC_APP_PRIVATE_KEY"]
+    if a.get("jira", {}).get("enabled"):
+        variables += ["JIRA_BASE_URL", "JIRA_USER_EMAIL"]
+        secrets.append("JIRA_API_TOKEN")
+    return {"variables": variables, "secrets": secrets, "one_of_secrets": ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]}
+
+
+def discover(root, run=None):
+    """What the repo already has, so /sdlc:init asks only what it cannot find.
+
+    Reads (never writes, never prints secret values): the GitHub repo and its
+    default branch, repo variables (values) and secret names via `gh`, the
+    latest plugin tag, and the signed-in GitHub user. Returns suggested
+    answers plus what is missing.
+    """
+    out = {"repo": None, "base_branch": "main", "sdlc_ref": latest_tag(DEFAULT_REPO, run),
+           "owner": None, "jira": {"enabled": False}, "claude_auth": "missing", "models": {},
+           "variables": [], "secrets": []}
+    repo = gh_json(["repo", "view", "--json", "nameWithOwner,defaultBranchRef"], root, run) or {}
+    out["repo"] = repo.get("nameWithOwner")
+    out["base_branch"] = (repo.get("defaultBranchRef") or {}).get("name") or "main"
+    user = gh_json(["api", "user"], root, run) or {}
+    if user.get("login"):
+        out["owner"] = f"@{user['login']}"
+    variables = {v.get("name"): v.get("value", "") for v in gh_json(["variable", "list", "--json", "name,value"], root, run) or []}
+    secrets = sorted(s.get("name") for s in gh_json(["secret", "list", "--json", "name"], root, run) or [])
+    out["variables"], out["secrets"] = sorted(variables), secrets
+    site = re.sub(r"^https?://", "", variables.get("JIRA_BASE_URL", "")).strip("/")
+    if site:
+        # Jira is wanted when the repo is already wired to a Jira site.
+        out["jira"] = {"enabled": True, "site": site, "space_key": None}
+    if "ANTHROPIC_API_KEY" in secrets:
+        out["claude_auth"] = "api_key"
+    elif "CLAUDE_CODE_OAUTH_TOKEN" in secrets:
+        # A subscription has usage limits: builds, the longest runs, use the lighter model.
+        out["claude_auth"] = "subscription"
+        out["models"] = {"build": "claude-sonnet-5"}
+    need = needed(out)
+    out["missing"] = ([v for v in need["variables"] if v not in variables] + [s for s in need["secrets"] if s not in secrets]
+                      + ([] if set(need["one_of_secrets"]) & set(secrets) else ["ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"]))
+    return out
+
+
 def check_stack_files(root):
     """Problems in the repo's .sdlc/build.yaml and .sdlc/deploy.yaml as they are (hand edits included).
 
@@ -878,6 +981,8 @@ def main():
     mode.add_argument("--stack", help="JSON stack to record in .sdlc/build.yaml")
     mode.add_argument("--check-stack-files", action="store_true",
                       help="validate .sdlc/build.yaml and .sdlc/deploy.yaml as they are (the stack PR check)")
+    mode.add_argument("--discover", action="store_true",
+                      help="what the repo already has (gh): suggested answers and missing variables/secrets, as JSON")
     ap.add_argument("--force", action="store_true", help="also rewrite the create-once config files")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -889,6 +994,9 @@ def main():
         if infra["found"]:
             found["infra"] = infra
         print(json.dumps(found, indent=2))
+        return 0
+    if args.discover:
+        print(json.dumps(discover(root), indent=2))
         return 0
     if args.check_stack_files:
         problems = check_stack_files(root)
