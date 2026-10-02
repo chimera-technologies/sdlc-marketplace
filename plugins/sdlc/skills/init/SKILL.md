@@ -76,7 +76,7 @@ Arguments: `$ARGUMENTS`
    `"models"` when `--discover` suggested any):
 
    ```json
-   {"sdlc_ref": "v0.16.0", "base_branch": "main",
+   {"sdlc_ref": "v0.16.1", "base_branch": "main",
     "owners": {"product_owner": "@po", "service_owner": "@org/sre", "tech_lead": "@lead", "security_owner": "@lead"},
     "jira": {"enabled": true, "site": "acme.atlassian.net", "space_key": "ACM"},
     "stages": {"ui_design": false}, "auto_build": true,

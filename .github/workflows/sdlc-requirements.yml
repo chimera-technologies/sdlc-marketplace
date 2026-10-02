@@ -103,6 +103,7 @@ jobs:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
           MANUAL: ${{ inputs.document }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           # A requirement document: any .md, .txt or .pdf directly in requirements/.
           DOC_RE: '^requirements/[^/]+\.(md|txt|pdf)$'
         run: |
@@ -117,6 +118,19 @@ jobs:
             fi
             git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" \
               | grep -iE "$DOC_RE" > "$RUNNER_TEMP/docs.txt" || true
+            # Also every document never turned into intents: merged before this
+            # workflow existed (an upgrade), or a run that failed. A document is
+            # processed once an intent on the base branch, or any intent PR (open,
+            # merged or closed), names it.
+            gh pr list --repo "$GITHUB_REPOSITORY" --state all --label source:document --limit 500 \
+              --json body -q '.[].body' > "$RUNNER_TEMP/doc-prs.txt" 2>/dev/null || true
+            for f in requirements/*; do
+              if [ ! -f "$f" ] || ! grep -qiE "$DOC_RE" <<<"$f"; then continue; fi
+              grep -qxF "$f" "$RUNNER_TEMP/docs.txt" && continue
+              if grep -rqF "$f" intent/ 2>/dev/null || grep -qF "\`$f\`" "$RUNNER_TEMP/doc-prs.txt"; then continue; fi
+              echo "Not turned into intents yet: $f"
+              echo "$f" >> "$RUNNER_TEMP/docs.txt"
+            done
           fi
           echo "Documents:"; cat "$RUNNER_TEMP/docs.txt"
           echo "count=$(wc -l < "$RUNNER_TEMP/docs.txt")" >> "$GITHUB_OUTPUT"
@@ -260,7 +274,9 @@ jobs:
               echo
               echo "**The other intents from this document:** $(jq -r --arg s "$SLUG" '[.intents[] | select(.slug != $s) | "`\(.slug)`"] | join(", ")' "$split")"
             else
-              echo "Intent drafted from a requirement document in \`requirements/\`."
+              # Name the document (the intent's Evidence cites it): later runs use this to skip it.
+              doc=$(grep -oE 'requirements/[^ `)]+\.(md|txt|pdf)' "intent/$SLUG.md" | head -n1 || true)
+              echo "Intent drafted from the requirement document \`${doc:-requirements/}\`."
             fi
             echo
             echo "**Merge to accept this intent: Design starts automatically.** Close it with a reason to reject it, or edit it on this branch. Each intent from the document is its own PR, so you confirm the split by merging the ones you accept."
