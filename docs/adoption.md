@@ -51,8 +51,11 @@ on the marketplace repo (or someone who has it).
 
 - Plan: `/sdlc:write-intent` with a requirement, or label a Jira ticket
   `intent`. Merge the intent PR: the spec PR follows.
-- After the spec merges, record the stack if you had none:
-  `/sdlc:init stack=specs/<slug>.md`.
+- After the spec merges, a **stack PR** opens by itself with the spec's
+  stack and cloud decision for `.sdlc/build.yaml` and `.sdlc/deploy.yaml`
+  (each value with the spec line it comes from). The tech lead merges it.
+  If the spec still says "Decision needed", no PR opens: decide it, or run
+  `/sdlc:init stack=specs/<slug>.md` by hand.
 - Build: automatic once the stack is recorded. Each story gets a plan PR;
   merging it builds the story in CI and opens the story PR; merging that
   starts the next story. To build by hand instead, set `"auto_build": false`

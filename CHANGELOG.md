@@ -4,6 +4,35 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.14.0 (2026-10-02)
+
+Recording the stack is automatic: merging a spec opens the stack PR.
+
+- **New `sdlc-spec-to-stack.yml`** (called on push, next to
+  spec-to-stories): `sdlc:init mode=headless` reads the merged spec's
+  Technology and architecture decision and writes a proposal with the spec
+  line behind each value (`evidence`), or `decided: false` with the reason
+  when the spec still says "Decision needed" (it never picks between
+  options). `init_project.py --stack` validates and applies it; only when
+  `.sdlc/build.yaml` or `.sdlc/deploy.yaml` changes does a stack PR
+  (`sdlc/stack-<slug>`) open for the tech lead, with a value-by-value table
+  and the diff. Not decided: no PR; the run summary and the spec's Jira
+  record say so. Merging the stack PR starts the automatic Build.
+- **`init_project.py --stack` validates** before writing (toolchains with
+  presets, a test_command, `{file}` in test_file_command, relative paths,
+  no `#`, valid cloud and IaC); `--dry-run` only checks.
+- **Stack check on PRs** (`sdlc-spec-check.yml` job `stack`, check
+  `spec-check / stack`): any PR that changes `.sdlc/build.yaml` or
+  `.sdlc/deploy.yaml`, including a tech lead's hand edits in the stack PR,
+  is validated as it is (`init_project.py --check-stack-files`). An
+  undecided stack (all empty) passes. Add it to the required checks.
+- Caller: a `stack` job and re-run option; `models.stack` (default
+  claude-sonnet-5).
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.14.0`. `/sdlc:init stack=` still works by hand.
+
 ## v0.13.0 (2026-10-01)
 
 Infrastructure as code, containers and Kubernetes, on whichever cloud the
