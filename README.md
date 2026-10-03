@@ -80,6 +80,7 @@ plugins/sdlc/
 .github/workflows/
   sdlc-*.yml     reusable workflows the projects call
   ci.yml         plugin tests, example validation, actionlint, plugin validate
+  release-tag.yml  tags each new version when it merges, with its GitHub release
   evals.yml      end-to-end evals of the skills (manual for now)
 .github/actions/setup-stack/        installs a project's declared toolchains
 tests/           unit tests (stdlib unittest)
@@ -94,8 +95,10 @@ docs/            adoption, stages, configuration, architecture, POC examples
 - Try the plugin without a release: `claude --plugin-dir plugins/sdlc`
 - Release: bump `version` in `plugins/sdlc/.claude-plugin/plugin.json` and
   `.claude-plugin/marketplace.json`, add a [CHANGELOG.md](CHANGELOG.md) entry
-  (with **Upgrading** steps if projects must act), tag `v<version>`, push the
-  tag. Projects upgrade with `/sdlc:init upgrade=v<version>`.
+  (with **Upgrading** steps if projects must act), and merge the PR. The
+  `release-tag` workflow tags the merge `v<version>` and publishes the GitHub
+  release with that CHANGELOG entry, so the release is usable at once.
+  Projects upgrade with `/sdlc:init upgrade=v<version>`.
 
 The worked POC (a workout app taken from a requirement document through
 every stage) is in [docs/examples/poc/](docs/examples/poc/) and the
