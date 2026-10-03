@@ -4,6 +4,23 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.16.2 (2026-10-03)
+
+- **Merging the spec accepts its recommended stack.** When the tech lead
+  merged or approved a PR that changed the spec, the stack step treats the
+  option the spec recommends as decided (even where it still says
+  "Decision needed from: tech lead"), and the stack PR cites it ("accepted
+  by @lead, spec PR #6"). Specs with no single recommendation, or accepted
+  by someone else, stay undecided as before.
+- **Catch-up**: while no stack is recorded, each push also takes merged
+  specs that never got a stack PR, so an upgrade (or a later acceptance)
+  opens the stack PR without a manual re-run.
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.16.2`; merging it opens the stack PR for a merged
+  spec that is still waiting.
+
 ## v0.16.1 (2026-10-02)
 
 - `sdlc-requirements.yml` also picks up every requirement document that was

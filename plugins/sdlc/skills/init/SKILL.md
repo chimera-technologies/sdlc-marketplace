@@ -76,7 +76,7 @@ Arguments: `$ARGUMENTS`
    `"models"` when `--discover` suggested any):
 
    ```json
-   {"sdlc_ref": "v0.16.1", "base_branch": "main",
+   {"sdlc_ref": "v0.16.2", "base_branch": "main",
     "owners": {"product_owner": "@po", "service_owner": "@org/sre", "tech_lead": "@lead", "security_owner": "@lead"},
     "jira": {"enabled": true, "site": "acme.atlassian.net", "space_key": "ACM"},
     "stages": {"ui_design": false}, "auto_build": true,
@@ -146,9 +146,16 @@ write only `.sdlc-output/init-stack.json`.
    build files and run
    `python3 "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --detect` for what
    already exists. Read the current `.sdlc/build.yaml` and `.sdlc/deploy.yaml`.
-2. **Decided or not.** The stack is decided only if the spec names one
-   choice (an existing stack, or a recommended option the spec states as
-   decided, not "Decision needed"). If it is still open, write
+2. **Decided or not.** The stack is decided if the spec names one choice
+   (an existing stack, or an option the spec states as decided), **or** if
+   the arguments include `accepted_by=@<tech lead> accepted_pr=<n>`: the
+   tech lead merged or approved the spec PR, which accepts the option the
+   spec **recommends** even where it still says "Decision needed from: tech
+   lead". Then use that recommended option, and say so in the evidence
+   (`"decided": "Recommended Option A, accepted by @lead (spec PR #6)"`).
+   It is still open when there is no `accepted_by` and the spec says
+   "Decision needed", or when the spec recommends no single option (then
+   `accepted_by` changes nothing). If open, write
    `{"decided": false, "reason": "<what is still open, quoted>"}` and stop.
    Never pick between options yourself.
 3. **Decided**: write the same JSON as "Record the stack" above (toolchains,
