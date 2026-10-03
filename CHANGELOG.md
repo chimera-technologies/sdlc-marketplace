@@ -4,6 +4,23 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.16.3 (2026-10-03)
+
+- **Stack proposals give a `test_file_command` that runs any test file.**
+  With more than one test runner (for example Vitest and Playwright), the
+  stack step proposes one project script that picks the runner
+  (`npm run test:file -- {file}`) instead of a single runner's command,
+  which could not run the other kind (found in skills-dashboard).
+- **The first story adds the scripts the build commands need**
+  (`build-story`), and `review-plan` rates a plan that leaves one missing,
+  or a test file the command could not run, as `critical`.
+
+### Upgrading
+
+- `/sdlc:init upgrade=v0.16.3`. A stack PR opened by an earlier version can
+  be refreshed: close it and merge any change, or re-run the `stack` step
+  (Actions > SDLC push > Run workflow).
+
 ## v0.16.2 (2026-10-03)
 
 - **Merging the spec accepts its recommended stack.** When the tech lead

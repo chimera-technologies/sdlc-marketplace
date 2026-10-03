@@ -52,6 +52,15 @@ tech lead's decision in the spec's Technology and architecture section. If
 `test_command` is missing, stop and tell the person to run
 `/sdlc:init stack=specs/<slug>.md`, which records it.
 
+**Commands that need project scripts**: if `test_command`,
+`test_file_command` or `install_command` calls a script the repo does not
+have yet (for example `npm run test:file -- {file}` or `npm run test:e2e`
+before `package.json` exists), the plan of the story that creates the
+project (usually S1) adds it, in its Files and Steps, and makes it work as
+the command expects: `test:file` runs any one test file with the right
+runner (for example Playwright for files under the end-to-end folder,
+Vitest otherwise). Every later story relies on these commands.
+
 The plugin's build guard hook blocks any write to the repo's code paths
 until the preflight has succeeded, you are on the story branch, and the
 plan exists. Do not try to bypass it.

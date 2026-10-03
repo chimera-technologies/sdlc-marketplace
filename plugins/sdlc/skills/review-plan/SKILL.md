@@ -48,6 +48,12 @@ result as the output. Otherwise do the checks yourself.
 
 ## Check
 
+0. **The build commands work after this story**: every script that
+   `.sdlc/build.yaml`'s `install_command`, `test_command` and
+   `test_file_command` call exists in the repo or is added by this plan,
+   and `test_file_command` would run each test file this plan adds
+   (unit and end-to-end alike). A missing one is a `critical` bug: every
+   later story's build depends on it.
 1. **Edge cases the plan misses**: empty and boundary inputs (0, 1, max,
    max+1), invalid, malformed or hostile input, failures of what the story
    depends on (storage, network, permissions, a slow or missing service),
