@@ -76,7 +76,7 @@ Arguments: `$ARGUMENTS`
    `"models"` when `--discover` suggested any):
 
    ```json
-   {"sdlc_ref": "v0.16.2", "base_branch": "main",
+   {"sdlc_ref": "v0.16.3", "base_branch": "main",
     "owners": {"product_owner": "@po", "service_owner": "@org/sre", "tech_lead": "@lead", "security_owner": "@lead"},
     "jira": {"enabled": true, "site": "acme.atlassian.net", "space_key": "ACM"},
     "stages": {"ui_design": false}, "auto_build": true,
@@ -167,6 +167,15 @@ write only `.sdlc-output/init-stack.json`.
    the tool's standard commands (`npm ci`, `npm test`, `pytest -q`,
    `mvn -B test`). Keep a value the current config already has unless the
    spec changes it.
+   **`test_file_command` must run any one test file the project will have**,
+   whichever runner it belongs to: the build runs each story's test files
+   with it. With one runner, use that runner (`npx vitest run {file}`,
+   `pytest -q {file}`). With more than one (for example Vitest for unit
+   tests and Playwright for end-to-end tests), never name one runner: use
+   one project script that picks the runner from the file's path
+   (`npm run test:file -- {file}`, `make test-file FILE={file}`), and say in
+   its evidence that the scaffold story adds that script. The same goes for
+   any script `test_command` calls (`npm run test:e2e`).
 4. Check it: `python3 "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --stack .sdlc-output/init-stack.json --dry-run`
    and fix every error.
 
