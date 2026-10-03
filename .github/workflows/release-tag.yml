@@ -1,0 +1,64 @@
+name: Release tag
+
+# This repo's own release: when a merge to main carries a plugin version that
+# has no tag yet, tag that commit v<version> and create the GitHub release
+# from its CHANGELOG.md entry. Projects pin these tags, so a release is usable
+# the moment its PR merges; nobody has to remember to tag it.
+# A push with no version bump (docs, CI) finds the tag already there and does
+# nothing. Tags are never moved or deleted here.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # create the tag and the release
+
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # all tags
+
+      - name: Read the version
+        id: version
+        run: |
+          set -euo pipefail
+          plugin=$(jq -r .version plugins/sdlc/.claude-plugin/plugin.json)
+          market=$(jq -r '.plugins[] | select(.name == "sdlc") | .version' .claude-plugin/marketplace.json)
+          [ "$plugin" = "$market" ] || { echo "::error::plugin.json ($plugin) and marketplace.json ($market) differ"; exit 1; }
+          [[ "$plugin" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version $plugin is not X.Y.Z"; exit 1; }
+          tag="v$plugin"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists at $(git rev-list -n1 "$tag" | cut -c1-7); nothing to release."
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tag and release
+        if: steps.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Notes: this version's CHANGELOG.md section, up to the next "## v" heading.
+          awk -v h="## $TAG " 'index($0, h) == 1 {on = 1; next} /^## v/ && on {exit} on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::warning::CHANGELOG.md has no '## $TAG' section; releasing without notes"
+            echo "See CHANGELOG.md." > "$RUNNER_TEMP/notes.md"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$GITHUB_SHA" -m "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "Released $TAG at ${GITHUB_SHA:0:7}" >> "$GITHUB_STEP_SUMMARY"
