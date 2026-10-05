@@ -17,11 +17,11 @@
     ]
   },
   "strictKnownMarketplaces": [
-    { "source": "github", "repo": "bala-chimera/sdlc-marketplace" }
+    { "source": "github", "repo": "chimera-technologies/sdlc-marketplace" }
   ],
   "extraKnownMarketplaces": {
     "chimera-sdlc": {
-      "source": { "source": "github", "repo": "bala-chimera/sdlc-marketplace" }
+      "source": { "source": "github", "repo": "chimera-technologies/sdlc-marketplace" }
     }
   },
   "env": {

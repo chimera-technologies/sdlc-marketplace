@@ -27,13 +27,13 @@ on:
   workflow_call:
     inputs:
       sdlc_ref:
-        description: "Tag of bala-chimera/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
         type: string
         required: true
       sdlc_repo:
         description: "The plugin marketplace repo"
         type: string
-        default: bala-chimera/sdlc-marketplace
+        default: chimera-technologies/sdlc-marketplace
       app_id:
         description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
         type: string

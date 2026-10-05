@@ -163,7 +163,7 @@ class InitTest(unittest.TestCase):
     def test_auto_build(self):
         self.run_init()
         push = self.read(".github/workflows/sdlc-push.yml")
-        self.assertIn("uses: bala-chimera/sdlc-marketplace/.github/workflows/sdlc-build.yml@v0.6.0", push)
+        self.assertIn("uses: chimera-technologies/sdlc-marketplace/.github/workflows/sdlc-build.yml@v0.6.0", push)
         self.assertIn("inputs.rerun == 'build'", push)
         self.assertIn("options: [requirements, intent-to-spec, spec-to-stories, stack, build, release]", push)
         self.assertTrue(json.loads(self.read(".sdlc/sdlc.json"))["auto_build"])

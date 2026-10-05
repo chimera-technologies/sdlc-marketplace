@@ -32,7 +32,7 @@ import re
 import sys
 from pathlib import Path
 
-DEFAULT_REPO = "bala-chimera/sdlc-marketplace"
+DEFAULT_REPO = "chimera-technologies/sdlc-marketplace"
 GRAPHIFY_VERSION = "0.9.71"
 PONYTAIL_REF = "v4.10.0"
 STAGES = ["plan", "design", "ui_design", "build", "pr_review", "test", "deploy", "maintain"]

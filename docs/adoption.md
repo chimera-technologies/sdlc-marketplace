@@ -5,7 +5,7 @@ on the marketplace repo (or someone who has it).
 
 ## 1. One-time, for the marketplace (per GitHub account or org)
 
-1. **Let projects use the marketplace.** In `bala-chimera/sdlc-marketplace`
+1. **Let projects use the marketplace.** In `chimera-technologies/sdlc-marketplace`
    > Settings > Actions > General > **Access**, choose "Accessible from
    repositories owned by" your account or organization. Projects then call
    its reusable workflows and read the plugin.
@@ -18,7 +18,7 @@ on the marketplace repo (or someone who has it).
 
 1. **Install the plugin** in Claude Code, in the project folder:
    ```
-   claude plugin marketplace add bala-chimera/sdlc-marketplace
+   claude plugin marketplace add chimera-technologies/sdlc-marketplace
    claude plugin install sdlc@chimera-sdlc --scope project
    ```
 2. **Run `/sdlc:init`** in a Claude Code session there. It asks for owners,

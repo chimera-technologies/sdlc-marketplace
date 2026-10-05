@@ -21,7 +21,7 @@ plugin and is not installed by it.
 - **OpenTelemetry export** for sessions, tool decisions and hook
   allow/block events. Replace the endpoint with your collector.
 
-Before deploying, replace `bala-chimera/sdlc-marketplace` and the OTLP
+Before deploying, check the marketplace repo (`chimera-technologies/sdlc-marketplace`), replace the OTLP
 endpoint, and confirm each key against the current Claude Code settings and
 monitoring docs. Test on one machine first with `/status`.
 

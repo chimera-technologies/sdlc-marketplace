@@ -8,7 +8,7 @@ files; `sdlc.json` is regenerated from, the rest are the project's to edit
 
 | Key | Meaning |
 |---|---|
-| `sdlc_repo` | The marketplace repo, e.g. `bala-chimera/sdlc-marketplace` |
+| `sdlc_repo` | The marketplace repo, e.g. `chimera-technologies/sdlc-marketplace` |
 | `sdlc_ref` | The plugin release tag every caller and the settings pin, e.g. `v0.6.0` |
 | `base_branch` | The protected branch artifacts merge into (default `main`) |
 | `maintain_cron` | Schedule of the Maintain checks (default hourly `17 * * * *`) |
