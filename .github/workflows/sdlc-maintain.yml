@@ -16,7 +16,7 @@ on:
         required: true
       sdlc_repo:
         type: string
-        default: bala-chimera/sdlc-marketplace
+        default: chimera-technologies/sdlc-marketplace
       app_id:
         type: string
         required: true

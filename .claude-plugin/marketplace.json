@@ -1,7 +1,7 @@
 {
   "name": "chimera-sdlc",
   "owner": {
-    "name": "bala-chimera (POC)"
+    "name": "Chimera Technologies"
   },
   "metadata": {
     "description": "Approved plugin marketplace for the AI-native SDLC: the sdlc plugin and the reusable workflows projects call."
