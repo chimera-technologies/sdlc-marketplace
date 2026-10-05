@@ -91,6 +91,12 @@ jobs:
       production_environment: ${{ steps.cfg.outputs.production_environment }}
       production_plan_environment: ${{ steps.cfg.outputs.production_plan_environment }}
     steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint short-lived GitHub App token
         id: app
         uses: actions/create-github-app-token@v2
@@ -98,6 +104,7 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
         with:
@@ -153,6 +160,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint short-lived GitHub App token
         id: app
         uses: actions/create-github-app-token@v2
@@ -160,6 +173,7 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
 
@@ -187,6 +201,12 @@ jobs:
       SDLC_VERSION: ${{ needs.detect.outputs.version }}
       SDLC_COMMIT: ${{ needs.detect.outputs.commit }}
     steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint short-lived GitHub App token
         id: app
         uses: actions/create-github-app-token@v2
@@ -194,6 +214,7 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
         with:
@@ -264,6 +285,12 @@ jobs:
       SDLC_VERSION: ${{ needs.detect.outputs.version }}
       SDLC_COMMIT: ${{ needs.detect.outputs.commit }}
     steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint short-lived GitHub App token
         id: app
         uses: actions/create-github-app-token@v2
@@ -271,6 +298,7 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
         with:
@@ -331,6 +359,12 @@ jobs:
       SDLC_VERSION: ${{ needs.detect.outputs.version }}
       SDLC_COMMIT: ${{ needs.detect.outputs.commit }}
     steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint short-lived GitHub App token
         id: app
         uses: actions/create-github-app-token@v2
@@ -338,6 +372,7 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
         with:

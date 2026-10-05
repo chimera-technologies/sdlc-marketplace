@@ -92,6 +92,12 @@ jobs:
       plan: ${{ steps.decide.outputs.plan }}
       build: ${{ steps.decide.outputs.build }}
     steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint short-lived GitHub App token
         id: app
         uses: actions/create-github-app-token@v2
@@ -99,6 +105,7 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
         with:
@@ -154,6 +161,12 @@ jobs:
       STORY: ${{ matrix.item.story }}
       TITLE: ${{ matrix.item.title }}
     steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint short-lived GitHub App token
         id: app
         uses: actions/create-github-app-token@v2
@@ -161,6 +174,7 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
         with:
@@ -390,6 +404,12 @@ jobs:
       STORY: ${{ matrix.item.story }}
       TITLE: ${{ matrix.item.title }}
     steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint short-lived GitHub App token
         id: app
         uses: actions/create-github-app-token@v2
@@ -397,6 +417,7 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
         with:

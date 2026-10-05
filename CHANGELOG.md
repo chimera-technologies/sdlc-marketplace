@@ -4,6 +4,34 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.17.0 (2026-10-05)
+
+- **The marketplace moved to `chimera-technologies/sdlc-marketplace`.** The
+  generator and every reusable workflow default to it (`sdlc_repo`).
+  Projects that pass `sdlc_repo` explicitly (all generated callers do)
+  keep working until they upgrade.
+- **sdlc-bot tokens cover only the project repo and the plugin repo.** Each
+  workflow scopes its App token with `repositories:` instead of getting
+  every repo the App is installed on, so an org can install the App on
+  many repos without widening what one run can touch. The plugin repo
+  must have the same owner as the project (already required for private
+  reusable workflows).
+
+**Upgrading**
+
+1. The project must be in the `chimera-technologies` organization: a
+   private reusable workflow can only be called from the same owner.
+   Transfer a personal repo first (Settings > Transfer).
+2. Install the org's sdlc-bot App on the project and on
+   `sdlc-marketplace`, and set the project's `SDLC_APP_ID` and
+   `SDLC_APP_PRIVATE_KEY` to that App's values.
+3. Set `"sdlc_repo": "chimera-technologies/sdlc-marketplace"` in
+   `.sdlc/sdlc.json`, then `/sdlc:init upgrade=v0.17.0` (or
+   `init_project.py --upgrade v0.17.0`) and merge the PR. It rewrites the
+   callers and the marketplace source in `.claude/settings.json`.
+4. On each machine: `claude plugin marketplace remove chimera-sdlc`, then
+   `claude plugin marketplace add chimera-technologies/sdlc-marketplace`.
+
 ## v0.16.3 (2026-10-03)
 
 - **Stack proposals give a `test_file_command` that runs any test file.**

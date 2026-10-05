@@ -79,6 +79,12 @@ jobs:
           echo "manifests=$manifests" >> "$GITHUB_OUTPUT"
           if [ -n "$manifests" ]; then echo "Designs to validate: $manifests"; else echo "No designs changed; nothing to validate."; fi
 
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Mint short-lived GitHub App token
         if: steps.changed.outputs.manifests != ''
         id: app
@@ -87,6 +93,7 @@ jobs:
           app-id: ${{ inputs.app_id }}
           private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
 
       - name: Check out pinned sdlc plugin
         if: steps.changed.outputs.manifests != ''

@@ -78,5 +78,24 @@ class WorkflowScriptTest(unittest.TestCase):
             self.assertIn("Workflow", step, f"{wf}: {skill} needs the Workflow tool")
 
 
+class AppTokenScopeTest(unittest.TestCase):
+    """Every sdlc-bot token covers only the project repo and the plugin repo,
+    not every repo the App is installed on (an org may install it widely)."""
+
+    def test_every_app_token_is_scoped(self):
+        found = 0
+        for wf in sorted((ROOT / ".github" / "workflows").glob("sdlc-*.yml")):
+            steps = re.split(r"\n(?=[ \t]*- name: )", wf.read_text(encoding="utf-8"))
+            for k, step in enumerate(steps):
+                if "actions/create-github-app-token@" not in step:
+                    continue
+                found += 1
+                self.assertIn("repositories: ${{ steps.app-repos.outputs.names }}", step, f"{wf.name}: unscoped token")
+                prev = steps[k - 1]
+                self.assertIn("id: app-repos", prev, f"{wf.name}: the scope step must come just before the token")
+                self.assertIn('echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}"', prev, wf.name)
+        self.assertGreater(found, 20)
+
+
 if __name__ == "__main__":
     unittest.main()
