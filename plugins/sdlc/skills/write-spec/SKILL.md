@@ -74,6 +74,19 @@ Follow the template's headings exactly, in order.
     lives, and the smoke test that proves a deploy worked. Never assume a
     cloud the repo or the intent does not name. `/sdlc:init stack=` records
     the accepted choice in `.sdlc/build.yaml` and `.sdlc/deploy.yaml`.
+  - **UI component library**, whenever the change has a user interface:
+    name the one library the UI is built from, chosen the same way (the
+    one the repo already uses; else two or three options against the
+    criteria in `${CLAUDE_SKILL_DIR}/reference/ui-libraries.md`, a
+    recommendation and "Decision needed from: tech lead"). Prefer an
+    established, accessible, themeable library over hand-built components.
+    Say how the design's Tokens map to its theme. `/sdlc:init stack=`
+    records it as `ui_library` in `.sdlc/build.yaml`; the build uses it for
+    every standard element.
+  - **Code quality commands** go with the stack: the whole-project static
+    checks (linter and type checker, `check_command`), and the per-file
+    linter and formatter the hooks run after each write (`lint_command`,
+    `format_command`, each with `{file}`). Use the stack's standard tools.
   - Infrastructure work gets its own stories with testable criteria (for
     example "terraform validate and checkov pass", "the staging smoke test
     reaches /healthz over HTTPS"), marked "No UI" in the design. Put the

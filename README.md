@@ -76,7 +76,9 @@ plugins/sdlc/
   agents/        verifier (Build)
   workflows/     Claude Code workflows for big jobs: requirements-to-intents, review-panel
   reference/     workflows.md: when each workflow runs (thresholds, auto/always/off)
-  hooks/         headless write guard, build guard, intent/spec validation on write
+  hooks/         headless write guard, build guard, code hooks (secrets, lock files, dangerous
+                 commands, format and lint after each write, Graphify kept current),
+                 intent/spec/plan validation on write
 .github/workflows/
   sdlc-*.yml     reusable workflows the projects call
   ci.yml         plugin tests, example validation, actionlint, plugin validate

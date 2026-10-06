@@ -113,8 +113,12 @@ After a spec's Technology and architecture decision is accepted:
 1. Read the spec's decision and the repo's files. Propose `toolchains`
    (`node@<v>`, `python@<v>`, `java@<v>`, `dotnet@<v>`, `go@<v>`; anything
    else via `setup_command`), `install_command`, `test_command`,
-   `test_file_command` (with `{file}`), `test_paths`, `code_paths` and
-   `report_path`. Commands must not contain `#`.
+   `test_file_command` (with `{file}`), `test_paths`, `code_paths`,
+   `report_path`, the code quality commands `check_command` (whole-project
+   linter and type checker), `lint_command` and `format_command` (one file,
+   with `{file}`; the hooks run them after each code write), and
+   `ui_library` (the UI component library the spec chose; empty without a
+   UI). Commands must not contain `#`.
    If the spec decided where it runs, also propose a `deploy` object for
    `.sdlc/deploy.yaml`, using only what the spec decided: `cloud` (`none`,
    `aws`, `azure`, `gcp`), `iac` (`none`, `terraform`), `iac_dir`,
@@ -160,7 +164,8 @@ write only `.sdlc-output/init-stack.json`.
    Never pick between options yourself.
 3. **Decided**: write the same JSON as "Record the stack" above (toolchains,
    install_command, test_command, test_file_command, test_paths, code_paths,
-   report_path, and `deploy` only if the spec decided where it runs), plus
+   report_path, check_command, lint_command, format_command, ui_library, and
+   `deploy` only if the spec decided where it runs), plus
    `"decided": true` and `"evidence"`: for each key you set, the spec line it
    comes from (`{"toolchains": "Node LTS, pinned in package.json"}`).
    Prefer the commands the repo already uses; for a greenfield stack, use

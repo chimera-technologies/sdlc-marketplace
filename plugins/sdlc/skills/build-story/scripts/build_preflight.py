@@ -139,6 +139,49 @@ def ensure_gitignore(text, lines):
     return (text.rstrip("\n") + "\n" + block) if text.strip() else block.lstrip("\n"), True
 
 
+# ------------------------------------------------------------ the graph
+
+def stale_marker(project):
+    """Code files changed since the graph was last built, one per line (written by the code hooks)."""
+    return Path(project) / "graphify-out" / "STALE"
+
+
+def update_graph(project):
+    """Build or update graphify-out/graph.json from the code (local, no tokens).
+
+    Returns a report line; raises SystemExit on failure. Clears the stale and
+    no-code markers once the graph is current.
+    """
+    graph = Path(project) / "graphify-out" / "graph.json"
+    args = ("update", ".") if graph.is_file() else ("extract", ".", "--code-only")
+    res = run(graphify_cmd(*args), project)
+    if args[0] == "update" and res.returncode != 0:
+        # update refuses when the graph would shrink (e.g. after deleting code): rebuild instead.
+        args = ("extract", ".", "--code-only")
+        res = run(graphify_cmd(*args), project)
+    if res.returncode != 0 or not graph.is_file():
+        raise SystemExit(f"graphify {' '.join(args)} failed:\n{(res.stderr or res.stdout)[-1500:]}")
+    for marker in (guard.no_code_marker(project), stale_marker(project)):
+        if marker.is_file():
+            marker.unlink()
+    m = re.search(r"(\d+) nodes, (\d+) edges", res.stdout + res.stderr)
+    return (f"graphify: graph {'updated' if args[0] == 'update' else 'built'}"
+            + (f" ({m.group(1)} nodes, {m.group(2)} edges)" if m else ""))
+
+
+def refresh_if_stale(project):
+    """Update the graph when the code hooks marked it stale. Returns a report line, or None if it was current."""
+    if not stale_marker(project).is_file():
+        return None
+    if run(graphify_cmd("--version"), project, 60).returncode != 0:
+        return "graphify: not installed, graph left stale (run the Build preflight)"
+    cfg = guard.load_build_config(project) or {"code_paths": []}
+    if not has_code(project, cfg):
+        stale_marker(project).unlink()
+        return None
+    return update_graph(project)
+
+
 # ------------------------------------------------------------- the steps
 
 def has_code(project, cfg):
@@ -167,30 +210,17 @@ def step_graphify(project, cfg, report):
     else:
         report.append(f"graphify: {installed} already installed")
 
-    graph = Path(project) / "graphify-out" / "graph.json"
     marker = guard.no_code_marker(project)
     if not has_code(project, cfg):
         # The first story creates the code: there is nothing to index yet. The
-        # marker lets the build guard allow this session's writes; the next
-        # preflight (after code exists) builds the real graph.
+        # marker lets the build guard allow this session's writes; the code
+        # hooks build the real graph once the story has written code.
         marker.parent.mkdir(parents=True, exist_ok=True)
         write_lf(marker, "No code under code_paths when the preflight ran; the next preflight builds the graph.\n")
         report.append(f"graphify: WARNING no code under {', '.join(cfg['code_paths'])} yet, so no graph; "
-                      "continuing (re-run the preflight once the story has code)")
+                      "continuing (the graph is built once the story has code)")
         return
-    args = ("update", ".") if graph.is_file() else ("extract", ".", "--code-only")
-    res = run(graphify_cmd(*args), project)
-    if args[0] == "update" and res.returncode != 0:
-        # update refuses when the graph would shrink (e.g. after deleting code): rebuild instead.
-        args = ("extract", ".", "--code-only")
-        res = run(graphify_cmd(*args), project)
-    if res.returncode != 0 or not graph.is_file():
-        raise SystemExit(f"graphify {' '.join(args)} failed:\n{(res.stderr or res.stdout)[-1500:]}")
-    if marker.is_file():
-        marker.unlink()
-    m = re.search(r"(\d+) nodes, (\d+) edges", res.stdout + res.stderr)
-    report.append(f"graphify: graph {'updated' if args[0] == 'update' else 'built'}"
-                  + (f" ({m.group(1)} nodes, {m.group(2)} edges)" if m else ""))
+    report.append(update_graph(project))
 
     if os.environ.get("SDLC_HEADLESS") == "1":
         # CI (automatic Build): the skill already tells Claude to query the graph,

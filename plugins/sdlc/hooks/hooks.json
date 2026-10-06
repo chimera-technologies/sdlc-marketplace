@@ -1,5 +1,5 @@
 {
-  "description": "SDLC guardrails: headless write guard, build guard (no code before preflight and plan), and intent/spec validation on write.",
+  "description": "SDLC guardrails: headless write guard, build guard (no code before preflight and plan), code hooks (no secrets, lock-file or dependency-folder edits, no commands that change real environments or bypass review; format and lint after each code write; Graphify kept current), and intent/spec/plan validation on write.",
   "hooks": {
     "PreToolUse": [
       {
@@ -21,6 +21,26 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/code_hooks.py\" pre-write",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/code_hooks.py\" pre-bash",
+            "timeout": 180
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -31,6 +51,27 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/validate_on_write.py\"",
             "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/code_hooks.py\" post-write",
+            "timeout": 200
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/code_hooks.py\" stop",
+            "timeout": 180
           }
         ]
       }

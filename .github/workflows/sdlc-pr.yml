@@ -328,6 +328,12 @@ jobs:
         if: steps.stack.outputs.test_command == ''
         run: echo "::notice::Tests skipped. No test_command in .sdlc/build.yaml yet, or none of its code_paths exist (the first story creates them)."
 
+      - name: Run the project's static checks (check_command)
+        if: steps.stack.outputs.check_command != '' && steps.stack.outputs.test_command != ''
+        env:
+          CMD: ${{ steps.stack.outputs.check_command }}
+        run: bash -euo pipefail -c "$CMD"
+
       - name: Run the project's tests (test_command)
         if: steps.stack.outputs.test_command != ''
         env:

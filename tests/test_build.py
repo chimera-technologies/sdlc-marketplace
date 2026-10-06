@@ -754,6 +754,59 @@ class PreflightNoCodeTest(unittest.TestCase):
         self.assertTrue(any("12 nodes" in line for line in report), report)
 
 
+class GraphRefreshTest(unittest.TestCase):
+    """refresh_if_stale: the code hooks keep the graph matching the code just written."""
+
+    fake_run = PreflightNoCodeTest.fake_run
+
+    def setUp(self):
+        PreflightNoCodeTest.setUp(self)
+        (self.root / ".sdlc").mkdir()
+        (self.root / ".sdlc" / "build.yaml").write_text("code_paths: [src/]\ntest_command: x\n", encoding="utf-8")
+        (self.root / "graphify-out").mkdir()
+
+    def refresh(self, version_ok=True):
+        def fake(cmd, cwd, timeout=600):
+            if cmd[-1] == "--version" and not version_ok:
+                return subprocess.CompletedProcess(cmd, 1, "", "No module named graphify")
+            return self.fake_run(cmd, cwd, timeout)
+        with mock.patch.object(bp, "run", fake):
+            return bp.refresh_if_stale(self.root)
+
+    def test_current_graph_is_left_alone(self):
+        self.assertIsNone(self.refresh())
+        self.assertEqual(self.calls, [])
+
+    def test_stale_graph_is_updated_and_marker_cleared(self):
+        (self.root / "graphify-out" / "graph.json").write_text("{}", encoding="utf-8")
+        (self.root / "src").mkdir()
+        (self.root / "src" / "a.ts").write_text("export {}\n", encoding="utf-8")
+        bp.stale_marker(self.root).write_text("src/a.ts\n", encoding="utf-8")
+        self.assertEqual(self.refresh(), "graphify: graph updated")
+        self.assertIn(["update", "."], self.calls)
+        self.assertFalse(bp.stale_marker(self.root).is_file())
+
+    def test_first_code_builds_the_graph(self):
+        bg.no_code_marker(self.root).write_text("x", encoding="utf-8")
+        (self.root / "src").mkdir()
+        (self.root / "src" / "a.ts").write_text("export {}\n", encoding="utf-8")
+        bp.stale_marker(self.root).write_text("src/a.ts\n", encoding="utf-8")
+        self.assertIn("graph built (12 nodes, 30 edges)", self.refresh())
+        self.assertFalse(bg.no_code_marker(self.root).is_file())
+
+    def test_without_graphify_the_graph_stays_stale(self):
+        (self.root / "src").mkdir()
+        (self.root / "src" / "a.ts").write_text("export {}\n", encoding="utf-8")
+        bp.stale_marker(self.root).write_text("src/a.ts\n", encoding="utf-8")
+        self.assertIn("not installed", self.refresh(version_ok=False))
+        self.assertTrue(bp.stale_marker(self.root).is_file())
+
+    def test_all_code_deleted_clears_the_marker(self):
+        bp.stale_marker(self.root).write_text("src/a.ts\n", encoding="utf-8")
+        self.assertIsNone(self.refresh())
+        self.assertFalse(bp.stale_marker(self.root).is_file())
+
+
 class PreflightLogicTest(unittest.TestCase):
     GRAPHIFY_ENTRY = {"matcher": "Read|Glob", "hooks": [{"type": "command", "command": "C:/x/graphify.exe hook-guard read"}]}
     OTHER_ENTRY = {"matcher": "Bash", "hooks": [{"type": "command", "command": "node other.js"}]}

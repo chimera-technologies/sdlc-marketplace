@@ -94,6 +94,10 @@ from the mockup template:
   a `-mobile` suffix.
 - The same `:root` tokens (colours, type, spacing) in every screen, and the
   same values in the manifest's Tokens section.
+- If the spec names a UI component library, draw its components as they
+  look with this theme (its buttons, inputs, dialogs, tables, spacing and
+  states), so the build can assemble each screen from the library without
+  custom widgets. Name the library under Tokens in the manifest.
 - Real copy from the spec, never lorem ipsum. Show each state as it would
   look (a filled list has realistic items; an error shows its message).
 - Design only what the stories ask for; nothing from Out of scope.

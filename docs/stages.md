@@ -50,7 +50,11 @@ Jira ticket / document / breach
   Figma is optional: `/sdlc:design-ui from=mockups` imports the mockups for a
   designer, and the design PR replaces the PNGs with Figma exports. (CI
   cannot drive Figma: its MCP server accepts only a person's OAuth login.)
-- **Build**: the build guard blocks code until the preflight (Graphify and
+- **Build**: the code reuses the project's `PATTERNS.md` and builds UI from
+  the spec's `ui_library`; the code hooks block secrets, lock-file edits and
+  commands that change real environments, format and lint each file as it
+  is written, and keep the Graphify graph current; `check_command` runs
+  before the suite. The build guard blocks code until the preflight (Graphify and
   Ponytail), the story branch and the approved plan exist; every acceptance
   criterion maps to a named test; an independent verifier on a smaller model.
   Automatic (`auto_build`, default on): after every merge, `next_story.py`

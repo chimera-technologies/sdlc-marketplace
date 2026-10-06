@@ -22,6 +22,7 @@ What it writes (paths relative to the project root):
   CLAUDE.md                  the block between <!-- sdlc:begin --> and
                              <!-- sdlc:end --> is regenerated; the rest is kept
   REVIEW.md                  created once
+  PATTERNS.md                created once; the project's reusable coding patterns, grown by each story
   .claude/settings.json      merged: plugin pins, permissions
   intent/ specs/ designs/ plans/ releases/, .gitignore lines
 """
@@ -107,7 +108,8 @@ def normalize(answers):
     st.setdefault("toolchains", [])
     st.setdefault("code_paths", ["src/", "tests/"])
     st.setdefault("test_paths", ["tests/"])
-    for k in ("install_command", "test_command", "test_file_command", "report_path", "setup_command"):
+    for k in ("install_command", "test_command", "test_file_command", "report_path", "setup_command",
+              "check_command", "lint_command", "format_command", "ui_library"):
         st.setdefault(k, "")
         if "#" in st[k]:
             errors.append(f"stack.{k} must not contain '#' (build.yaml treats it as a comment)")
@@ -194,6 +196,10 @@ def render_build(a):
         f"test_command: {s['test_command']}",
         f"test_file_command: {s['test_file_command']}     # {{file}} = one test file",
         f"report_path: {s['report_path']}",
+        f"check_command: {s['check_command']}     # whole-project static checks (lint, types), before the tests",
+        f"lint_command: {s['lint_command']}     # {{file}}: run after every code write; errors go back to Claude",
+        f"format_command: {s['format_command']}     # {{file}}: run after every code write; fixes formatting",
+        f"ui_library: {s['ui_library']}     # the UI component library the spec chose; empty = no UI",
         "",
         "# Token-saving tools the Build preflight installs and wires up (pinned).",
         f"graphify_version: {GRAPHIFY_VERSION}",
@@ -260,6 +266,44 @@ def render_maintain(a):
     }, indent=2) + "\n"
 
 
+def render_patterns_md(a):
+    return """# Coding patterns
+
+The reusable patterns of this codebase. `sdlc:build-story` reads this file
+before planning a story and follows it while building; the PR review checks
+changes against it. Each story that creates something reusable adds it here
+in the same PR. The generic catalogue these start from is the plugin's
+`skills/build-story/reference/patterns.md`.
+
+One entry per pattern: what to use, where it lives, and when.
+
+## Project structure
+
+<!-- Where each kind of code lives (feature folders, layers), and naming. -->
+
+## Errors and validation
+
+<!-- How input is validated at the edges and how errors are returned or shown. -->
+
+## Data access and external calls
+
+<!-- The one module that talks to storage, files or each external service. -->
+
+## UI components
+
+<!-- The UI library (ui_library in .sdlc/build.yaml), the theme or tokens,
+     and the shared components built on it. -->
+
+## State and configuration
+
+<!-- Where state lives, how configuration and feature flags are read. -->
+
+## Testing
+
+<!-- Test helpers, fixtures and builders to reuse; how tests are named and laid out. -->
+"""
+
+
 def render_review_md(a):
     return """# Review instructions
 
@@ -280,6 +324,12 @@ Naming, structure and small refactors are **low** at most.
 - Every acceptance criterion has a test named for `S<n> AC-<k>` that tests
   the behaviour, not just that something exists.
 - No new dependency, service or network call that the spec does not name.
+- The change follows `PATTERNS.md`: it reuses the module, component or
+  helper a pattern names instead of writing a second one, and a new
+  reusable piece is added to `PATTERNS.md` in the same PR.
+- UI is built from the `ui_library` in `.sdlc/build.yaml`: a hand-made
+  button, input, dialog, menu, table or similar that the library already
+  has is **medium**.
 
 ## Do not report
 
@@ -338,6 +388,11 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
   instructions. The agent that wrote a change never approves it.
 - Build: one story per session (`/clear` between stories); ask the graph
   (`graphify query`) before reading code; run one test file while iterating.
+- Code: reuse what `PATTERNS.md` names before writing anything new, and add
+  each new reusable piece to it; build UI from the `ui_library` in
+  `.sdlc/build.yaml`. The plugin's hooks block secrets, lock-file edits and
+  commands that change real environments, run `format_command` and
+  `lint_command` after each code write, and keep the Graphify graph current.
 - Big jobs run as Claude Code workflows (parallel agents, then skeptics):
   large requirement documents, large or high-risk specs, large story PRs.
   Setting: `workflows` in `.sdlc/sdlc.json` (`{a['workflows']}`; auto, always or off).
@@ -530,6 +585,7 @@ def plan_files(root, a, force=False):
         ".sdlc/owners.yaml": render_owners(a), ".sdlc/jira.yaml": render_jira(a), ".sdlc/build.yaml": render_build(a),
         ".sdlc/review.json": render_review(a), ".sdlc/deploy.yaml": render_deploy(a),
         ".sdlc/maintain.json": render_maintain(a), "REVIEW.md": render_review_md(a),
+        "PATTERNS.md": render_patterns_md(a),
     }
     for rel, content in once.items():
         if force or not (root / rel).is_file():
@@ -703,6 +759,10 @@ def set_stack(root, stack):
         "test_command": stack.get("test_command", ""),
         "test_file_command": stack.get("test_file_command", ""),
         "report_path": stack.get("report_path", ""),
+        "check_command": stack.get("check_command", ""),
+        "lint_command": stack.get("lint_command", ""),
+        "format_command": stack.get("format_command", ""),
+        "ui_library": stack.get("ui_library", ""),
     }
     if stack.get("test_paths"):
         values["test_paths"] = yaml_list(stack["test_paths"])
@@ -720,7 +780,8 @@ CLOUDS, IACS = ("none", "aws", "azure", "gcp"), ("none", "terraform")
 # Same list as .github/actions/setup-stack/stack.py SUPPORTED (a test keeps them equal).
 TOOLCHAINS = ["node", "python", "java", "dotnet", "go", "terraform", "helm", "kubectl"]
 TOOLCHAIN_RE = re.compile(r"^([a-z]+)@v?\d[\w.\-]*$")
-STACK_TEXT_KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path"]
+STACK_TEXT_KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path",
+                   "check_command", "lint_command", "format_command", "ui_library"]
 
 
 def validate_stack(stack):
@@ -743,6 +804,9 @@ def validate_stack(stack):
     tfc = str(stack.get("test_file_command", ""))
     if tfc and "{file}" not in tfc:
         errors.append("test_file_command must contain {file}")
+    for key in ("lint_command", "format_command"):
+        if isinstance(stack.get(key, ""), str) and stack.get(key) and "{file}" not in stack[key]:
+            errors.append(f"{key} must contain {{file}} (it runs on the one file Claude just wrote)")
     for key in STACK_TEXT_KEYS:
         if not isinstance(stack.get(key, ""), str):
             errors.append(f"{key} must be a string")

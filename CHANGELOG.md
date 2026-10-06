@@ -4,6 +4,53 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.19.0 (2026-10-06)
+
+- **Reusable coding patterns.** A generic catalogue,
+  `skills/build-story/reference/patterns.md` (reuse first, structure, errors
+  and validation, data access, UI components, state and configuration,
+  testing, logging), and a project `PATTERNS.md` that `/sdlc:init` creates
+  once. `build-story` reads both before planning, names what the story
+  reuses, and adds each new reusable piece to `PATTERNS.md` in the same PR
+  (the headless build may change it). The verifier and `review-story` flag
+  second copies of existing code as medium; `REVIEW.md` lists the rule.
+- **Code hooks** (`hooks/code_hooks.py`), in every repo with `.sdlc/`:
+  - before a write: blocks real-looking secrets (cloud keys, tokens,
+    private keys; obvious placeholders pass), hand edits of lock files, and
+    writes into dependency folders;
+  - before a command: blocks `terraform apply`/`destroy`, `kubectl
+    apply`/`delete`, `helm install`/`upgrade`, force pushes, pushes to the
+    base branch and `--no-verify`;
+  - after a code write: runs `format_command`, then `lint_command`, on the
+    file; lint errors go back to Claude. A linter that is not installed yet
+    is skipped;
+  - **Graphify stays current**: each code write marks the graph stale; it is
+    updated before the next `graphify query`, `explain` or `path`, and at the
+    end of each interactive turn. No preflight re-run needed.
+- **Plans are validated on write**, like intents and specs.
+- **UI component library.** `write-spec` names one for every spec with a UI
+  (criteria and common choices in `write-spec/reference/ui-libraries.md`),
+  `design-ui` draws its components, the stack records it as `ui_library`,
+  and the build uses it for every standard element; a hand-built one the
+  library has is a medium finding.
+- **Static checks.** New `.sdlc/build.yaml` keys: `check_command` (whole
+  project, run in Build, by the verifier, and in CI before the tests),
+  `lint_command` and `format_command` (one `{file}`, run by the hooks), and
+  `ui_library`. The setup-stack action outputs `check_command`.
+
+**Upgrading**
+
+1. `/sdlc:init upgrade=v0.19.0` and merge the PR. It adds `PATTERNS.md` if
+   the repo has none; `REVIEW.md` and `.sdlc/build.yaml` are yours and are
+   not rewritten.
+2. Add to `REVIEW.md`'s "Always check" the two new rules (follows
+   `PATTERNS.md`; UI from `ui_library`), as in a newly generated one.
+3. Add `check_command`, `lint_command`, `format_command` and `ui_library` to
+   `.sdlc/build.yaml` (or re-record the stack with `/sdlc:init
+   stack=specs/<slug>.md`). Empty keys turn each feature off.
+4. Fill in `PATTERNS.md` with what the codebase already does (the next
+   story can do this: ask for it in the plan).
+
 ## v0.18.0 (2026-10-06)
 
 - **A test report for every merged story.** After a story PR merges and the

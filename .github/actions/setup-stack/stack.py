@@ -3,7 +3,7 @@
 
 Writes GitHub Actions step outputs (to $GITHUB_OUTPUT, or prints them):
   node, python, java, java_distribution, dotnet, go   toolchain versions ("" = not used)
-  setup_command, install_command, test_command, test_file_command
+  setup_command, install_command, test_command, test_file_command, check_command
 
 build.yaml keys (all optional except test_command for the Test stage):
   toolchains: [node@22, python@3.12, java@21, dotnet@8.0, go@1.23, terraform@1.9.8, helm@3.16.2, kubectl@1.31.0]
@@ -13,6 +13,7 @@ build.yaml keys (all optional except test_command for the Test stage):
   test_command: npx playwright test
   test_file_command: npx playwright test {file} --reporter=line
   report_path: playwright-report/      # uploaded as an artifact after tests
+  check_command: npx tsc --noEmit && npx eslint .   # static checks, run before the tests
 
 Standard library only. Exit 1 on an unknown toolchain.
 """
@@ -25,7 +26,7 @@ from pathlib import Path
 # Infrastructure tools are toolchains too: the spec decides which.
 SUPPORTED = ["node", "python", "java", "dotnet", "go", "terraform", "helm", "kubectl"]
 V_PREFIXED = {"helm", "kubectl"}   # their setup actions want v1.2.3
-KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path"]
+KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path", "check_command"]
 
 
 def load_guard():
