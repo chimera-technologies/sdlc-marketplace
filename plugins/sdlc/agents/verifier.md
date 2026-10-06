@@ -28,9 +28,10 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
 1. **Plan traceability**: run
    `python "<validate_plan.py path from the caller>" --check-tests <plan>`.
    Every acceptance criterion must have a test named for `S<n> AC-<k>`.
-2. **Tests pass**: run `test_file_command` from `.sdlc/build.yaml` for this
-   story's test files, then `test_command` once for the full suite.
-   Report only failing test names and their first error line.
+2. **Checks and tests pass**: run `check_command` from `.sdlc/build.yaml`
+   if it is set (linter and type checker), then `test_file_command` for this
+   story's test files, then `test_command` once for the full suite. Report
+   only the failing checks or test names and their first error line.
 3. **Each criterion is really tested**: for every AC, read its test and
    confirm it checks the behaviour the criterion describes, not something
    weaker (for example, a test that only checks a button exists does not
@@ -43,6 +44,13 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
 4. **Repo rules** from `CLAUDE.md`: stack limits (no new dependencies,
    CDNs or frameworks if forbidden), required patterns (such as rendering
    user text with `textContent`), and file layout.
+4b. **Patterns and reuse** (`PATTERNS.md`): the change uses the modules,
+   components and helpers it names instead of writing second copies; code
+   duplicated from elsewhere in the repo is a medium finding; a new
+   reusable piece is added to `PATTERNS.md`. With a `ui_library` in
+   `.sdlc/build.yaml`, a hand-built standard element (button, input,
+   dialog, menu, table and the like) that the library has is a medium
+   finding.
 5. **Security** rules the spec lists for this story (SEC-n): input
    validation, no secrets, no unsafe HTML.
 6. **Scope**: changes outside the plan's Files table, or behaviour that no

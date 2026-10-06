@@ -57,12 +57,43 @@ not listed here.
 | `test_command` | `npx playwright test`, `pytest -q`, `mvn -B test` | The full suite (required for Test) |
 | `test_file_command` | `pytest -q {file}` | One test file while building (`{file}`) |
 | `report_path` | `playwright-report/` | Uploaded as an artifact after tests |
+| `check_command` | `npx tsc --noEmit && npx eslint .`, `ruff check . && mypy .` | Whole-project static checks: run in Build before the suite, by the verifier, and in CI before `test_command` |
+| `lint_command` | `npx eslint {file}`, `ruff check {file}` | One file (`{file}`), run by the code hooks after every code write; errors go back to Claude |
+| `format_command` | `npx prettier --write {file}`, `ruff format {file}` | One file (`{file}`), run by the code hooks after every code write; never blocks |
+| `ui_library` | `shadcn/ui`, `Angular Material`, `MudBlazor` | The UI component library the spec chose; the build uses it for every standard element |
 | `graphify_version`, `ponytail_ref` | `0.9.71`, `v4.10.0` | Pins for the Build preflight's token-saving tools |
 
 The stack is the tech lead's decision in the spec; record it with
-`/sdlc:init stack=specs/<slug>.md`. Commands must not contain `#`.
+`/sdlc:init stack=specs/<slug>.md`. Commands must not contain `#`, and the
+hooks run `lint_command` and `format_command` in bash, as CI does. A linter
+that is not installed yet (before the scaffold story adds it) is skipped,
+not reported as a failure.
 Test names use `S<n> AC-<k>` in the language's style (`"S1 AC-2: ..."`,
 `test_s1_ac_2_...`, `S1Ac2...`).
+
+## `PATTERNS.md` (coding patterns)
+
+Created once by `/sdlc:init`, then owned by the project: the codebase's
+reusable patterns (structure, errors and validation, data access, UI
+components, state and configuration, testing). `build-story` reads it
+before planning, reuses what it names, and adds each new reusable piece in
+the same PR; the verifier and the PR review check changes against it. The
+generic catalogue it starts from is
+`plugins/sdlc/skills/build-story/reference/patterns.md`.
+
+## Code hooks
+
+The plugin's hooks run in every repo with `.sdlc/`, interactive and in CI:
+
+| When | What |
+|---|---|
+| Before a write | Blocks text that looks like a real secret, hand edits of lock files, and writes into dependency folders |
+| Before a command | Blocks `terraform apply`/`destroy`, `kubectl apply`/`delete`, `helm install`/`upgrade`, force pushes, pushes to the base branch and `--no-verify`; updates a stale Graphify graph before `graphify query`, `explain` or `path` |
+| After a code write | Runs `format_command`, then `lint_command`, on the file; lint errors go back to Claude. Marks the graph stale |
+| End of each turn | Updates the graph if code changed (interactive sessions) |
+
+So the Graphify graph always matches the code just written, without
+re-running the preflight.
 
 ## `.sdlc/review.json` (PR review)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""PostToolUse hook: validate intent/*.md and specs/*.md every time Claude
-writes one.
+"""PostToolUse hook: validate intent/*.md, specs/*.md and plans/*.md every
+time Claude writes one.
 
 The skills already tell Claude to run their validator; this hook makes it
 hold even when the skill's advice is skipped. On failure it exits 2 so the
@@ -17,6 +17,7 @@ SKILLS = HERE.parent / "skills"
 VALIDATORS = {
     "intent": SKILLS / "write-intent" / "scripts" / "validate_intent.py",
     "specs": SKILLS / "write-spec" / "scripts" / "validate_spec.py",
+    "plans": SKILLS / "build-story" / "scripts" / "validate_plan.py",
 }
 
 
@@ -43,7 +44,9 @@ def main():
 
     cmd = [sys.executable, str(VALIDATORS[rel.parts[0]])]
     owners = project / ".sdlc" / "owners.yaml"
-    if owners.is_file():
+    if rel.parts[0] == "plans":
+        cmd += ["--root", str(project)]
+    elif owners.is_file():
         cmd += ["--owners", str(owners)]
     cmd.append(str(path))
     # Run from the project root so a spec can find the intent it names.

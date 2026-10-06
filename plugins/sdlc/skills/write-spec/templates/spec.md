@@ -29,7 +29,10 @@ owners you actually found. Say plainly what you could not find.>
 <Existing codebase: state the stack in use and what this change touches.
 Greenfield: two or three options with trade-offs, a recommendation, and
 "Decision needed from: tech lead". Use approved standards if a standards
-skill exists; anything outside them goes under Areas of concern.>
+skill exists; anything outside them goes under Areas of concern. With a UI:
+"UI component library: <name>, because <criteria>" and how the design's
+Tokens map to its theme. The code quality commands: static checks, per-file
+linter and formatter.>
 
 ## Design
 <How it works: components, data flow, interfaces, rollout and rollback.

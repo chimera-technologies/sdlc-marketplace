@@ -29,6 +29,9 @@ outputs:
   report_path:
     description: "Test report folder to upload (report_path), or empty"
     value: ${{ steps.stack.outputs.report_path }}
+  check_command:
+    description: "The project's static checks (lint, types) to run before the tests, or empty"
+    value: ${{ steps.stack.outputs.check_command }}
 
 runs:
   using: composite

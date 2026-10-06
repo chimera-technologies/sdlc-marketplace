@@ -19,6 +19,8 @@ Files in this skill:
 - Preflight: `${CLAUDE_SKILL_DIR}/scripts/build_preflight.py`
 - Plan template: `${CLAUDE_SKILL_DIR}/templates/plan.md`
 - Plan validator: `${CLAUDE_SKILL_DIR}/scripts/validate_plan.py`
+- Coding patterns: `${CLAUDE_SKILL_DIR}/reference/patterns.md` (generic) and
+  the project's `PATTERNS.md` (how this codebase does them; it wins)
 - Verifier subagent: `sdlc:verifier` (plugin agent)
 
 Arguments: `$ARGUMENTS`
@@ -65,6 +67,20 @@ The plugin's build guard hook blocks any write to the repo's code paths
 until the preflight has succeeded, you are on the story branch, and the
 plan exists. Do not try to bypass it.
 
+The plugin's code hooks also run on every write and command:
+- **before a write**: text that looks like a real secret, hand edits of
+  lock files and writes into dependency folders are blocked;
+- **before a command**: commands that change real environments or skip
+  review (`terraform apply`, `kubectl apply`, `helm upgrade`, a force push or
+  a push to the base branch, `--no-verify`) are blocked, and a stale graph
+  is updated before any `graphify query`;
+- **after a code write**: `format_command` and then `lint_command` from
+  `.sdlc/build.yaml` run on the file. Lint errors come back to you: fix them
+  before moving on. The Graphify graph is marked stale and updated before
+  the next graph query and at the end of each turn, so it always matches
+  the code you just wrote.
+If a hook blocks something, do what its message says; never work around it.
+
 ## Step 1: find the story
 
 - A Jira key (e.g. `ABC-123`): read it with the Atlassian MCP (`getJiraIssue`,
@@ -88,6 +104,16 @@ files the plan needs.
 If `designs/<spec-slug>/design.md` exists, read it and **look at the PNG of
 every screen whose Stories column names this story** (Read the images). The
 UI you build must match them: elements, order, copy, states and Tokens.
+
+Read `PATTERNS.md` and `${CLAUDE_SKILL_DIR}/reference/patterns.md`, and ask
+the graph for code that already does part of the story. **Reuse first**: the
+plan's Files and Steps name the existing modules, components and helpers
+the story uses, and say which new piece is reusable (it goes into
+`PATTERNS.md` in this story). With a UI, build every standard element from
+the `ui_library` in `.sdlc/build.yaml`; a component the library lacks is
+built once, on its primitives and theme, as a shared component. If the
+story is the scaffold (S1), it installs the library, sets up its theme from
+the design's Tokens, and fills in `PATTERNS.md` for the stack.
 
 Present a plan following `${CLAUDE_SKILL_DIR}/templates/plan.md`:
 - **Design** (required when the story has screens): each screen id and
@@ -145,8 +171,11 @@ fail for the right reason (missing behaviour, not a typo).
 ## Step 5: implement until green
 
 Implement in small steps, re-running only the story's test file after each.
-Follow `CLAUDE.md`'s stack and rules. After 5 failed rounds on the same
-test, stop and tell the person what is blocking.
+Follow `CLAUDE.md`'s stack and rules and `PATTERNS.md`: reuse what it names,
+keep business rules pure and I/O at the edges, validate input where it
+enters, and use the UI library's components. Fix lint errors the hook
+reports as they come. After 5 failed rounds on the same test, stop and tell
+the person what is blocking.
 
 If the story has screens: capture each state the screens show (a web UI:
 a Playwright or browser screenshot; other UIs: the platform's screenshot
@@ -154,11 +183,15 @@ tool) into a folder git ignores, Read it next to the design PNG, and fix
 visible differences in layout, copy and colours.
 
 Then run, once each:
+- `check_command` from `.sdlc/build.yaml`, if set (linter and type checker
+  over the whole project), and fix what it reports;
 - the full suite once with `test_command`;
 - `python "${CLAUDE_SKILL_DIR}/scripts/validate_plan.py" --check-tests plans/<id>.md`;
-- the preflight again (`python "${CLAUDE_SKILL_DIR}/scripts/build_preflight.py"`):
-  it updates the graph, or builds it for the first time when this story
-  created the first code (local, no tokens).
+- update `PATTERNS.md` with each reusable piece this story created (what,
+  where, when to use it), in the section it belongs to.
+The code hooks keep the graph current. If `graphify-out/STALE` is still
+there (Graphify was not installed), run the preflight again
+(`python "${CLAUDE_SKILL_DIR}/scripts/build_preflight.py"`).
 
 ## Step 6: independent verification
 
@@ -173,7 +206,7 @@ smaller model with fresh context and reports PASS or FAIL per criterion.
 ## Step 7: commit, PR, Jira
 
 1. Commit the plan, code and tests together:
-   `git add plans/<id>.md <files from the plan> <test files>`, then
+   `git add plans/<id>.md <files from the plan> <test files> PATTERNS.md`, then
    `git commit -m "<JIRA-KEY>: <story title>"`. Never `git add -A`.
 2. `git push -u origin <branch>`, then open the PR titled
    `<JIRA-KEY>: <story title>` to `main`. Body: the story in one line, the
@@ -189,7 +222,8 @@ smaller model with fresh context and reports PASS or FAIL per criterion.
 
 - One story per session. `/clear` after its PR is open.
 - Graph first: `graphify query`, `explain` or `path` before any Read or
-  Grep. Read only the files in the plan, and only the parts you need.
+  Grep. Read only the files in the plan, and only the parts you need. The
+  hooks update the graph after your writes, so its answers include them.
 - Run the story's test file, not the whole suite, while iterating; use the
   short reporter; read only the first error of a failing test.
 - Graphify does not index Terraform (`.tf`) or YAML (Kubernetes manifests,
@@ -257,12 +291,15 @@ change). Never ask, never wait.
 1. Step 0 (preflight), as above.
 2. Steps 4, 5 and 6 (tests first, implement until green, verifier), using
    the plan's Files and Tests tables **and every row of its Review findings**
-   (each one fixed, with its `S<n> <id>` test passing). Install dependencies yourself with the
+   (each one fixed, with its `S<n> <id>` test passing), `PATTERNS.md` and the
+   UI library. `PATTERNS.md` is the one project file outside the plan you
+   may change: add each reusable piece the story created. Install dependencies yourself with the
    stack's commands when the story adds them (for example `npm install`
    for a new `package.json`). Do not run `git` commands.
 3. Write `.sdlc-output/build-report.md` for the PR body:
-   - first line exactly `RESULT: PASS` (verifier PASS, full suite green,
-     `--check-tests` clean, every Review finding fixed) or `RESULT: INCOMPLETE`;
+   - first line exactly `RESULT: PASS` (verifier PASS, `check_command` and
+     the full suite green, `--check-tests` clean, every Review finding fixed)
+     or `RESULT: INCOMPLETE`;
    - the AC-to-test table (criterion, test file, test name, passing), and
      the Review findings table (id, how it was fixed, test, passing);
    - the verifier's report;

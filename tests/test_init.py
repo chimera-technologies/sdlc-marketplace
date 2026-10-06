@@ -34,6 +34,13 @@ def yaml_load(text):
     return yaml.safe_load(text)
 
 
+def bg_load(root):
+    spec = importlib.util.spec_from_file_location("build_guard", ROOT / "plugins" / "sdlc" / "hooks" / "build_guard.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.load_build_config(root)
+
+
 class InitTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -357,6 +364,57 @@ class InitTest(unittest.TestCase):
                 self.assertEqual(ip.detect(d)["test_command"], test_cmd, name)
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(ip.detect(d), {})
+
+    def test_code_quality_keys_and_patterns(self):
+        self.run_init()
+        build = self.read(".sdlc/build.yaml")
+        for key in ("check_command:", "lint_command:", "format_command:", "ui_library:"):
+            self.assertIn(key, build)
+        patterns = self.read("PATTERNS.md")
+        for heading in ("## Errors and validation", "## UI components", "## Testing"):
+            self.assertIn(heading, patterns)
+        review = self.read("REVIEW.md")
+        self.assertIn("follows `PATTERNS.md`", review)
+        self.assertIn("`ui_library`", review)
+        self.assertIn("reuse what `PATTERNS.md` names", self.read("CLAUDE.md"))
+        ip.set_stack(self.root, {"test_command": "npm test", "check_command": "npx tsc --noEmit && npx eslint .",
+                                 "lint_command": "npx eslint {file}", "format_command": "npx prettier --write {file}",
+                                 "ui_library": "shadcn/ui"})
+        build = self.read(".sdlc/build.yaml")
+        self.assertIn("check_command: npx tsc --noEmit && npx eslint .", build)
+        self.assertIn("lint_command: npx eslint {file}", build)
+        self.assertIn("ui_library: shadcn/ui", build)
+        self.assertEqual(bg_load(self.root)["format_command"], "npx prettier --write {file}")
+
+    def test_patterns_md_is_created_once_and_on_upgrade(self):
+        self.run_init()
+        (self.root / "PATTERNS.md").write_text("# Coding patterns\n\nOurs.\n", encoding="utf-8")
+        self.run_init()
+        self.assertEqual(self.read("PATTERNS.md"), "# Coding patterns\n\nOurs.\n")
+        (self.root / "PATTERNS.md").unlink()
+        r = subprocess.run([sys.executable, str(INIT), "--root", str(self.root), "--upgrade", "v0.7.0"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("## UI components", self.read("PATTERNS.md"))
+
+    def test_lint_and_format_need_the_file(self):
+        text = " ".join(ip.validate_stack({"test_command": "npm test", "lint_command": "npx eslint .",
+                                           "format_command": "npx prettier --write ."}))
+        self.assertIn("lint_command must contain {file}", text)
+        self.assertIn("format_command must contain {file}", text)
+        self.assertEqual(ip.validate_stack({"test_command": "npm test", "lint_command": "npx eslint {file}",
+                                            "check_command": "npx eslint ."}), [])
+
+    def test_setup_stack_exposes_check_command(self):
+        spec = importlib.util.spec_from_file_location("stack", ROOT / ".github" / "actions" / "setup-stack" / "stack.py")
+        stack = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stack)
+        self.assertIn("check_command", stack.KEYS)
+        action = (ROOT / ".github" / "actions" / "setup-stack" / "action.yml").read_text(encoding="utf-8")
+        self.assertIn("steps.stack.outputs.check_command", action)
+        for wf in ("sdlc-pr.yml", "sdlc-main-tests.yml"):
+            text = (ROOT / ".github" / "workflows" / wf).read_text(encoding="utf-8")
+            self.assertLess(text.index("(check_command)"), text.index("(test_command)"), wf)
 
     def test_set_stack_rewrites_only_stack_keys(self):
         self.run_init()
