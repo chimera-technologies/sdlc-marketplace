@@ -16,6 +16,7 @@ files; `sdlc.json` is regenerated from, the rest are the project's to edit
 | `models` | `intake`, `spec`, `review`, `build`: the Claude model per headless stage |
 | `workflows` | `auto` (default): big jobs run as Claude Code workflows (parallel agents, then skeptics) above the thresholds in `plugins/sdlc/reference/workflows.md`: large requirement documents (`write-intent`), large or high-risk specs (`review-spec`), large story PRs (`review-story`); `always`; `off` (one session) |
 | `auto_build` | `true` (default): each story gets a plan PR and is built in CI when it merges (`sdlc-build.yml`); `false`: build by hand with `/sdlc:build-story` |
+| `staging_on_merge` | `true` (default): with Deploy on, every merge to the base branch whose tests pass is deployed to staging and smoke-tested (trunk-based; no tag, never production); `false`: staging only with a release ([trunk-based.md](trunk-based.md)) |
 
 Change it and re-run `/sdlc:init` (or `init_project.py --answers`), or move
 the tag with `init_project.py --upgrade vX.Y.Z`.

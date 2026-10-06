@@ -31,7 +31,11 @@ on the marketplace repo (or someone who has it).
 5. **Branch protection** on the base branch: require the checks from
    [stages.md](stages.md) once each has run once (GitHub only lists checks
    it has seen). Skipped checks count as passing, so non-story PRs are not
-   blocked by story checks.
+   blocked by story checks. For trunk-based delivery
+   ([trunk-based.md](trunk-based.md)) also: require a pull request (no
+   direct pushes), require branches to be up to date before merging,
+   require linear history and allow squash merging only, and turn on
+   "Automatically delete head branches".
 6. **Jira Automation** (if Jira is on): rule "Field value changed: Labels",
    condition `labels = intent`, action "Send web request" POST
    `https://api.github.com/repos/<owner>/<project>/dispatches`, headers

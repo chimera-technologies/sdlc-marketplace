@@ -36,7 +36,10 @@ linter and formatter.>
 
 ## Design
 <How it works: components, data flow, interfaces, rollout and rollback.
-Enough for an engineer to plan the build, not the code itself.>
+Enough for an engineer to plan the build, not the code itself. Rollout:
+the feature flag that hides a multi-story feature until it is done (name,
+default off, the stories behind it, the story that turns it on), or why
+none is needed.>
 
 ## Security considerations
 | Rule | Applies? | How this design satisfies it |

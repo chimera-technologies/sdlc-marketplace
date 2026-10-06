@@ -59,6 +59,10 @@ dependency, build or report folders (`node_modules/`, `.venv/`, `target/`,
    Report visible differences with the screen id; ignore pixel-level detail.
 5. **REVIEW.md**: every "Always check" rule, with its severity.
 6. **CLAUDE.md**: stack limits and required patterns.
+6a. **Trunk-based**: if the spec's rollout names a feature flag for this
+   story, new user-visible behaviour is behind it and off by default (high
+   if it is reachable with the flag off), and only the story the spec names
+   turns it on. The PR leaves the base branch releasable.
 6b. **Patterns and reuse**: the change reuses what `PATTERNS.md` names (a
    second copy of an existing helper or component is medium); a new
    reusable piece is added to `PATTERNS.md`; standard UI elements come from

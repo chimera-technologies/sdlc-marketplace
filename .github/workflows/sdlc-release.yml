@@ -51,6 +51,14 @@ on:
         description: "Apply an infrastructure plan that destroys or replaces resources (after reading it)"
         type: boolean
         default: false
+      staging_on_merge:
+        description: "Trunk-based: deploy every merge to the base branch to staging (no tag, never production)"
+        type: boolean
+        default: false
+      trunk_green:
+        description: "The tests of this push passed on the base branch. When false, only a rollback is released"
+        type: boolean
+        default: true
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
@@ -81,6 +89,8 @@ jobs:
       file: ${{ steps.find.outputs.file }}
       version: ${{ steps.find.outputs.version }}
       commit: ${{ steps.find.outputs.commit }}
+      mode: ${{ steps.find.outputs.mode }}
+      label: ${{ steps.find.outputs.label }}
       jira_keys: ${{ steps.find.outputs.jira_keys }}
       deploys: ${{ steps.cfg.outputs.deploys }}
       deploy_command: ${{ steps.cfg.outputs.deploy_command }}
@@ -124,6 +134,8 @@ jobs:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
           MANUAL_FILE: ${{ inputs.release_file }}
+          STAGING_ON_MERGE: ${{ inputs.staging_on_merge }}
+          TRUNK_GREEN: ${{ inputs.trunk_green }}
         run: |
           set -euo pipefail
           if [ -n "$MANUAL_FILE" ]; then
@@ -135,17 +147,37 @@ jobs:
             fi
             mapfile -t files < <(git diff --name-only --diff-filter=A "$BEFORE" "$AFTER" -- 'releases/v*.md')
           fi
-          if [ "${#files[@]}" -eq 0 ]; then echo "No new release record; nothing to release."; exit 0; fi
+          if [ "${#files[@]}" -eq 0 ]; then
+            if [ "$STAGING_ON_MERGE" = "true" ] && [ -z "$MANUAL_FILE" ] && [ "$TRUNK_GREEN" != "true" ]; then
+              echo "::warning::${{ inputs.base_branch }} is red: not deploying it to staging until the tests pass."
+            elif [ "$STAGING_ON_MERGE" = "true" ] && [ -z "$MANUAL_FILE" ]; then
+              # Trunk-based: this merge goes to staging as it is; production still needs a release.
+              short=$(git rev-parse --short "$AFTER")
+              { echo "mode=continuous"; echo "commit=$AFTER"; echo "label=${{ inputs.base_branch }}@$short"; } >> "$GITHUB_OUTPUT"
+              echo "No new release record: deploying ${{ inputs.base_branch }}@$short to staging."
+            else
+              echo "No new release record; nothing to release."
+            fi
+            exit 0
+          fi
           if [ "${#files[@]}" -gt 1 ]; then echo "::error::one release record per merge, got ${files[*]}"; exit 1; fi
           f="${files[0]}"
           python3 "$VALIDATE_RELEASE" --owners .sdlc/owners.yaml "$f"
           python3 "$VALIDATE_RELEASE" --json "$f" > "$RUNNER_TEMP/release.json"
           commit=$(jq -r .commit "$RUNNER_TEMP/release.json")
+          # Trunk-based: never release a red trunk. A rollback goes out anyway: it is how a bad release is undone.
+          if [ "$TRUNK_GREEN" != "true" ] && [ "$(jq -r .type "$RUNNER_TEMP/release.json")" != "rollback" ]; then
+            echo "::error::${{ inputs.base_branch }} is red (see the open main-red issue): fix it before releasing, or release a rollback."
+            exit 1
+          fi
           git merge-base --is-ancestor "$commit" "origin/${{ inputs.base_branch }}" \
             || { echo "::error::commit $commit is not on ${{ inputs.base_branch }}"; exit 1; }
+          version=$(jq -r .version "$RUNNER_TEMP/release.json")
           {
+            echo "mode=release"
+            echo "label=$version"
             echo "file=$f"
-            echo "version=$(jq -r .version "$RUNNER_TEMP/release.json")"
+            echo "version=$version"
             echo "commit=$commit"
             echo "jira_keys=$(jq -r '.jira_keys | join(" ")' "$RUNNER_TEMP/release.json")"
           } >> "$GITHUB_OUTPUT"
@@ -192,13 +224,21 @@ jobs:
 
   staging:
     needs: [detect, tag]
-    if: needs.detect.outputs.deploys == 'true' && needs.detect.outputs.staging_environment != ''
+    # A release (after its tag), or, trunk-based, every merge to the base branch (no tag).
+    if: >-
+      always() && needs.detect.result == 'success' && needs.detect.outputs.deploys == 'true'
+      && needs.detect.outputs.staging_environment != ''
+      && (needs.tag.result == 'success' || (needs.detect.outputs.mode == 'continuous' && needs.tag.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: ${{ needs.detect.outputs.staging_environment }}
+    # One deploy to staging at a time, in merge order.
+    concurrency:
+      group: ${{ github.repository }}-staging
+      cancel-in-progress: false
     env:
       SDLC_ENV: staging
-      SDLC_VERSION: ${{ needs.detect.outputs.version }}
+      SDLC_VERSION: ${{ needs.detect.outputs.label }}
       SDLC_COMMIT: ${{ needs.detect.outputs.commit }}
     steps:
       - name: Scope the App token to this repo and the plugin repo

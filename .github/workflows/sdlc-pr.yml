@@ -43,6 +43,10 @@ on:
         description: "vars.JIRA_USER_EMAIL"
         type: string
         default: ""
+      max_branch_days:
+        description: "Trunk-based: warn on a PR whose branch is older than this many days (0 = never)"
+        type: number
+        default: 3
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
@@ -80,8 +84,17 @@ jobs:
         id: cfg
         env:
           DRAFT: ${{ github.event.pull_request.draft }}
+          CREATED: ${{ github.event.pull_request.created_at }}
+          MAX_DAYS: ${{ inputs.max_branch_days }}
         run: |
           set -euo pipefail
+          # Trunk-based: branches live hours or a day or two, then merge to the trunk.
+          if [ -n "${CREATED:-}" ] && [ "${MAX_DAYS:-0}" -gt 0 ]; then
+            age=$(( ( $(date -u +%s) - $(date -u -d "$CREATED" +%s) ) / 86400 ))
+            if [ "$age" -gt "$MAX_DAYS" ]; then
+              echo "::warning title=Long-lived branch::This PR has been open $age days (limit $MAX_DAYS). Trunk-based: merge it, split it, or put unfinished work behind a feature flag."
+            fi
+          fi
           story=false
           if [[ "$HEAD_REF" == story/* ]] && [ "$DRAFT" != "true" ]; then story=true; fi
           advisory=$(jq -c --arg repo "$GITHUB_REPOSITORY" --arg pr "$PR" \
