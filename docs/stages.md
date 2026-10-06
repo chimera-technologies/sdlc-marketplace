@@ -11,7 +11,7 @@ workflows check it; hooks enforce what must always hold.
 | 2b | Design: UI | automatic with the spec (HTML mockups); `/sdlc:design-ui` to redo them or refine them in Figma | `designs/<slug>/design.md` + `mockups/*.html` + `screens/*.png` | `design-ui` | `sdlc-intent-to-spec`, `sdlc-design-check` | owner merges the spec PR, or a design PR (`design-check / validate`) |
 | 3 | Build | automatic, one story at a time: a plan PR, then the build when it merges; or `/sdlc:build-story <KEY>` by hand | `plans/<slug>-s<n>.md` (plan PR), then code and tests (story PR) | `build-story`, agent `verifier` | `sdlc-build` | owner merges the plan PR; verifier PASS |
 | 4 | PR review | a story PR is opened or pushed | review comment, `review:*` label | `review-story` + advisory reviewers | `sdlc-pr` | `pr / review-gate` |
-| 5 | Test | after the review gate passes | test results | (project tests) | `sdlc-pr`, `sdlc-main-tests` | `pr / traceability`, `pr / e2e`; owner merges |
+| 5 | Test | after the review gate passes | test results; after the merge, `test-reports/<plan-id>/` (test-report PR) | (project tests) | `sdlc-pr`, `sdlc-main-tests` | `pr / traceability`, `pr / e2e`; owner merges |
 | 6 | Deploy | `/sdlc:release` | `releases/<version>.md`, tag | `release` | `sdlc-release` | release PR merged; production waits for its environment's reviewers |
 | 7 | Maintain | the schedule in `sdlc-maintain.yml` | new intents | `triage` | `sdlc-maintain` -> `sdlc-intake` | service owner triages the intent PR |
 
@@ -24,6 +24,7 @@ Jira ticket / document / breach
   -> Build (per story, in order): plan PR --merge--> build in CI (preflight, tests first, verifier) -> story PR
      (story PR merged -> the next story's plan PR)
   -> PR review: review-gate (+ advisory) -> Test: traceability + tests -> merge -> Jira story Done
+     (story PR merged -> tests on main -> test-report PR)
   -> Deploy: /sdlc:release -> release PR --merge--> tag -> staging -> production (approved)
   -> Maintain: scheduled checks -> breach -> intake -> Plan
 ```
@@ -80,7 +81,12 @@ Jira ticket / document / breach
 - **PR review**: conformance to plan, spec, design, `REVIEW.md`, `CLAUDE.md`
   and the security policy gates the PR; advisory reviewers only comment.
 - **Test**: tests run only after the review gate; the project's own test
-  command from `.sdlc/build.yaml`, on its own toolchain.
+  command from `.sdlc/build.yaml`, on its own toolchain. After a story PR
+  merges and the tests on main have run, `test_report.py` writes
+  `test-reports/<plan-id>/` (every test named for the story and its status
+  in Build, the PR and main; the plan review, verifier and review gate) and
+  the bot opens it as a `test-report/<plan-id>` PR. CI logs give counts, not
+  test names, so each test shows the result of the run that included it.
 - **Deploy**: a validated release record; production needs a named human
   approval (GitHub environment reviewers); rollback is a new record. On the
   cloud the spec chose (AWS, Azure, GCP; OIDC, no long-lived keys):

@@ -1,6 +1,7 @@
 """Tests for plugins/sdlc/skills/init/scripts/init_project.py (project onboarding)."""
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -159,6 +160,18 @@ class InitTest(unittest.TestCase):
         job = push.split("  intent-to-spec:\n", 1)[1].split("\n  spec-to-stories:", 1)[0]
         self.assertIn("      ui_design: true\n", job)
         self.assertIn("automatic with the spec", self.read("CLAUDE.md"))
+
+    def test_tests_job_grants_what_the_report_job_reads(self):
+        """A reusable workflow's job may not ask for more than its caller grants."""
+        self.run_init()
+        push = self.read(".github/workflows/sdlc-push.yml")
+        job = push.split("  tests:\n", 1)[1].split("\n  release:", 1)[0]
+        granted = set(re.findall(r"^      ([a-z-]+): (read|write)$", job.split("    uses:", 1)[0], re.MULTILINE))
+        main_tests = (ROOT / ".github" / "workflows" / "sdlc-main-tests.yml").read_text(encoding="utf-8")
+        report = main_tests.split("\n  report:\n", 1)[1]
+        asked = set(re.findall(r"^      ([a-z-]+): (read|write)\b", report.split("    env:", 1)[0], re.MULTILINE))
+        self.assertTrue(asked)
+        self.assertLessEqual(asked, granted)
 
     def test_auto_build(self):
         self.run_init()
