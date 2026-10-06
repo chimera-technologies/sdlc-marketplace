@@ -115,6 +115,15 @@ built once, on its primitives and theme, as a shared component. If the
 story is the scaffold (S1), it installs the library, sets up its theme from
 the design's Tokens, and fills in `PATTERNS.md` for the stack.
 
+**Trunk-based.** The story merges to the base branch as soon as it is done
+and goes to staging, so it must leave the app releasable. If the spec's
+rollout names a feature flag for this story, put every new user-visible
+behaviour behind it (default off, read through the project's flag helper;
+the first flagged story adds the helper and records it in `PATTERNS.md`),
+and test both states: off keeps today's behaviour, on is the new one. Only
+the story the spec names turns the flag on. Keep the story small enough to
+merge within a day or two; if it cannot be, say so in the plan's Risks.
+
 Present a plan following `${CLAUDE_SKILL_DIR}/templates/plan.md`:
 - **Design** (required when the story has screens): each screen id and
   what this story must match on it.

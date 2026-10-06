@@ -23,7 +23,8 @@ Adopt it in a project in one command, **`/sdlc:init`**, then follow
 | Maintain | scheduled checks | breaches become intents | the service owner |
 
 Details: [docs/stages.md](docs/stages.md). Configuration:
-[docs/configuration.md](docs/configuration.md).
+[docs/configuration.md](docs/configuration.md). Every project works
+trunk-based: [docs/trunk-based.md](docs/trunk-based.md).
 
 ## Big jobs: Claude Code workflows
 

@@ -4,6 +4,47 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.20.0 (2026-10-06)
+
+Every project now works **trunk-based** ([docs/trunk-based.md](docs/trunk-based.md)).
+
+- **A red trunk stops the line.** The generated `sdlc-push.yml` makes
+  `build` wait for the tests of the push and skip when they fail, so no new
+  plan or story starts on a red base branch. `release` waits too and gets
+  `trunk_green`: on a red trunk only a `rollback` record is released. The
+  new `trunk` job in `sdlc-main-tests` opens a `main-red` issue when the
+  tests fail on the base branch, comments on later red runs, and closes it
+  when they pass again.
+- **Every merge goes to staging.** `sdlc-release` has a new input,
+  `staging_on_merge` (default `false`; `/sdlc:init` sets it from the new
+  `.sdlc/sdlc.json` key `staging_on_merge`, default `true`). A push with no
+  release record then deploys that commit to staging and smoke-tests it,
+  one at a time in merge order; no tag, never production. Production still
+  needs a release record and its approvers.
+- **Feature flags for multi-story features.** `write-spec` names a flag
+  (default off) in the rollout of any feature built over several stories;
+  `build-story` puts new behaviour behind it and tests both states; the
+  verifier and `review-story` flag behaviour reachable with the flag off as
+  high; `release` lists each flag's state and calls out a half-built spec
+  without one.
+- **Short-lived branches.** `sdlc-pr` warns on a PR open longer than the
+  new input `max_branch_days` (default 3). The code hooks already block
+  pushes to the base branch and force pushes.
+- **Releases from the trunk only**: hotfixes fix forward on the base
+  branch; no release branches or cherry-picks (now stated in `release`).
+
+**Upgrading**
+
+1. `/sdlc:init upgrade=v0.20.0` and merge the PR. It adds
+   `staging_on_merge: true` to `.sdlc/sdlc.json` and regenerates
+   `sdlc-push.yml` with the trunk gates. Set `staging_on_merge` to `false`
+   and re-run init if staging must not change on every merge.
+2. With Deploy on and `staging_on_merge`, make sure the `staging`
+   environment's `deploy_command` and `smoke_command` can run on every merge.
+3. Branch protection (a repo admin): require a PR, branches up to date,
+   linear history, squash merging only, and delete head branches
+   ([adoption.md](docs/adoption.md)).
+
 ## v0.19.0 (2026-10-06)
 
 - **Reusable coding patterns.** A generic catalogue,

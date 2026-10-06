@@ -6,6 +6,9 @@ name: "SDLC Test: main"
 #
 # End-to-end tests on main after every merge. Pull requests run the same
 # suite in pr.yml, after the PR review gate (Build -> PR review -> Test).
+# Trunk-based: a red base branch stops the line. The trunk job opens a
+# "main is red" issue (label main-red) when the tests fail, and closes it when
+# they pass again; the generated caller holds Build and Deploy until then.
 # After a story PR merges, the report job writes its test report
 # (test-reports/<plan-id>/: every test case and its status in each testing
 # flow) and opens it as a test-report PR.
@@ -115,6 +118,54 @@ jobs:
           path: ${{ steps.stack.outputs.report_path }}
           if-no-files-found: ignore
           retention-days: 30
+
+  trunk:
+    needs: e2e
+    if: always() && (needs.e2e.result == 'success' || needs.e2e.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
+
+      - name: Open or close the "main is red" issue
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          RESULT: ${{ needs.e2e.result }}
+          BASE: ${{ inputs.base_branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="$BASE is red: the tests fail on $BASE"
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --label main-red --state open --json number -q '.[0].number // empty' 2>/dev/null || true)
+          short=${GITHUB_SHA::7}
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" -q '.[0] | "#\(.number) \(.title)"' 2>/dev/null || true)
+          if [ "$RESULT" = "failure" ]; then
+            body="The tests failed on \`$BASE\` at \`$short\`${pr:+ (from $pr)}: $RUN_URL
+
+          Trunk-based: fixing $BASE comes first. Until the tests pass again, automatic Build starts no new plan or story and nothing deploys. Fix forward with a small PR, or revert the change that broke it."
+            if [ -n "$open" ]; then
+              gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "Still red at \`$short\`${pr:+ (from $pr)}: $RUN_URL"
+            else
+              gh label create main-red -R "$GITHUB_REPOSITORY" --color B60205 --description "The tests fail on the base branch" 2>/dev/null || true
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --label main-red --body "$body"
+            fi
+            echo "::error::$BASE is red at $short; Build and Deploy are held until it is fixed."
+          elif [ -n "$open" ]; then
+            gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "Green again at \`$short\`${pr:+ (from $pr)}: $RUN_URL. Build and Deploy carry on."
+          fi
 
   report:
     needs: e2e

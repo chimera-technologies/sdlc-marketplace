@@ -365,6 +365,51 @@ class InitTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(ip.detect(d), {})
 
+    def push_job(self, name):
+        push = self.read(".github/workflows/sdlc-push.yml")
+        return push.split(f"\n  {name}:\n", 1)[1].split("\n\n  ", 1)[0]
+
+    def test_trunk_based_red_trunk_stops_build_but_not_rollbacks(self):
+        self.run_init()
+        build = self.push_job("build")
+        self.assertIn("    needs: tests\n", build)
+        self.assertIn("needs.tests.result == 'success'", build)
+        self.assertIn("inputs.rerun == 'build'", build)
+        release = self.push_job("release")
+        self.assertIn("    needs: tests\n", release)
+        self.assertNotIn("needs.tests.result == 'success')", release.split("    uses:")[0], "a rollback must still run")
+        self.assertIn("trunk_green: ${{ needs.tests.result == 'success' || needs.tests.result == 'skipped' }}", release)
+        self.assertIn("staging_on_merge: true", release)
+        self.assertTrue(json.loads(self.read(".sdlc/sdlc.json"))["staging_on_merge"])
+        self.assertIn("Trunk-based: `main` is the trunk", self.read("CLAUDE.md"))
+
+    def test_trunk_based_without_tests_or_staging(self):
+        self.run_init({**ANSWERS, "staging_on_merge": False, "stages": {"test": False}})
+        self.assertNotIn("needs: tests", self.read(".github/workflows/sdlc-push.yml"))
+        self.assertNotIn("staging_on_merge: true", self.push_job("release"))
+        self.assertNotIn("trunk_green", self.push_job("release"))
+        self.assertFalse(json.loads(self.read(".sdlc/sdlc.json"))["staging_on_merge"])
+
+    def test_trunk_based_workflows(self):
+        wf = lambda name: (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")  # noqa: E731
+        release = wf("sdlc-release.yml")
+        # New inputs of a public contract need defaults that keep old callers working.
+        self.assertRegex(release, r"staging_on_merge:\n(?:        .*\n)*?        default: false")
+        self.assertRegex(release, r"trunk_green:\n(?:        .*\n)*?        default: true")
+        staging = release.split("\n  staging:\n", 1)[1].split("\n  production-plan:", 1)[0]
+        self.assertIn("needs.detect.outputs.mode == 'continuous' && needs.tag.result == 'skipped'", staging)
+        self.assertIn("cancel-in-progress: false", staging)
+        production = release.split("\n  production:\n", 1)[1]
+        self.assertIn("needs.tag.result == 'success'", production.split("steps:")[0], "continuous deploys never reach production")
+        self.assertIn('!= "rollback"', release)
+        main_tests = wf("sdlc-main-tests.yml")
+        trunk = main_tests.split("\n  trunk:\n", 1)[1].split("\n  report:", 1)[0]
+        for fragment in ("--label main-red", "gh issue create", "gh issue close"):
+            self.assertIn(fragment, trunk)
+        pr = wf("sdlc-pr.yml")
+        self.assertRegex(pr, r"max_branch_days:\n(?:        .*\n)*?        default: 3")
+        self.assertIn("title=Long-lived branch", pr)
+
     def test_code_quality_keys_and_patterns(self):
         self.run_init()
         build = self.read(".sdlc/build.yaml")

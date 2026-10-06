@@ -83,6 +83,8 @@ def normalize(answers):
     a["models"] = {**DEFAULT_MODELS, **(a.get("models") or {})}
     # Automatic Build: plan PR, then build, for each story in turn (sdlc-build.yml).
     a["auto_build"] = bool(a.get("auto_build", True))
+    # Trunk-based: every merge to the base branch is deployed to staging (Deploy on).
+    a["staging_on_merge"] = bool(a.get("staging_on_merge", True))
     # Claude Code workflows for big jobs (plugins/sdlc/reference/workflows.md).
     a.setdefault("workflows", "auto")
     if a["workflows"] not in ("auto", "always", "off"):
@@ -393,6 +395,12 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
   `.sdlc/build.yaml`. The plugin's hooks block secrets, lock-file edits and
   commands that change real environments, run `format_command` and
   `lint_command` after each code write, and keep the Graphify graph current.
+- Trunk-based: `{a['base_branch']}` is the trunk and is always releasable.
+  Branches are short-lived (merge within a day or two), work that is not
+  finished hides behind the spec's feature flag, every merge goes to
+  staging, and releases tag a commit on `{a['base_branch']}` (no release
+  branches; hotfixes fix forward). A red `{a['base_branch']}` stops the
+  line: fix it first.
 - Big jobs run as Claude Code workflows (parallel agents, then skeptics):
   large requirement documents, large or high-risk specs, large story PRs.
   Setting: `workflows` in `.sdlc/sdlc.json` (`{a['workflows']}`; auto, always or off).
@@ -408,14 +416,14 @@ def secrets_block(indent="    ", extra=()):
     return f"{indent}secrets:\n" + "".join(f"{indent}  {n}: ${{{{ secrets.{n} }}}}\n" for n in names)
 
 
-def call(a, workflow, extra_with="", if_expr="", extra_secrets=(), permissions=""):
+def call(a, workflow, extra_with="", if_expr="", extra_secrets=(), permissions="", needs=""):
     with_lines = (f"      sdlc_ref: {a['sdlc_ref']}\n"
                   f"      sdlc_repo: {a['sdlc_repo']}\n"
                   "      app_id: ${{ vars.SDLC_APP_ID }}\n"
                   f"      base_branch: {a['base_branch']}\n"
                   "      jira_base_url: ${{ vars.JIRA_BASE_URL }}\n"
                   "      jira_user_email: ${{ vars.JIRA_USER_EMAIL }}\n" + extra_with)
-    cond = f"    if: {if_expr}\n" if if_expr else ""
+    cond = (f"    needs: {needs}\n" if needs else "") + (f"    if: {if_expr}\n" if if_expr else "")
     cond += permissions
     return (f"{cond}    uses: {a['sdlc_repo']}/.github/workflows/{workflow}@{a['sdlc_ref']}\n"
             f"    with:\n{with_lines}" + secrets_block(extra=extra_secrets))
@@ -474,11 +482,28 @@ def render_callers(a):
             extra_with=f"      model: {m['stack']}\n      spec_file: ${{{{ inputs.rerun == 'stack' && inputs.file || '' }}}}\n",
             if_expr="github.event_name == 'push' || inputs.rerun == 'stack'"))
     auto_build = s["build"] and a["auto_build"]
+
+    def after_green_trunk(rerun):
+        # Trunk-based: a red base branch stops the line. With the Test stage on, Build
+        # waits for the tests of this push and does nothing if they fail.
+        if not s["test"]:
+            return {"if_expr": f"github.event_name == 'push' || inputs.rerun == '{rerun}'"}
+        return {"needs": "tests",
+                "if_expr": "${{ !cancelled() && ((github.event_name == 'push' && needs.tests.result == 'success')"
+                           f" || inputs.rerun == '{rerun}') }}}}"}
+
+    # Deploy waits for the tests too, but still runs on a red trunk: it releases
+    # only a rollback then (sdlc-release.yml checks trunk_green).
+    release_gate = ({"needs": "tests", "if_expr": "${{ !cancelled() && (github.event_name == 'push' || inputs.rerun == 'release') }}"}
+                    if s["test"] else {"if_expr": "github.event_name == 'push' || inputs.rerun == 'release'"})
+    trunk_green = ("      trunk_green: ${{ needs.tests.result == 'success' || needs.tests.result == 'skipped' }}\n"
+                   if s["test"] else "")
+
     if auto_build:
         jobs.append("  build:\n" + call(
             a, "sdlc-build.yml",
             extra_with=f"      model: {m['build']}\n      spec_file: ${{{{ inputs.rerun == 'build' && inputs.file || '' }}}}\n",
-            if_expr="github.event_name == 'push' || inputs.rerun == 'build'"))
+            **after_green_trunk("build")))
     if s["test"]:
         # The test report of a merged story reads its PRs, checks and test logs.
         jobs.append("  tests:\n" + call(
@@ -489,8 +514,9 @@ def render_callers(a):
         jobs.append("  release:\n" + call(
             a, "sdlc-release.yml",
             extra_with=("      release_file: ${{ inputs.rerun == 'release' && inputs.file || '' }}\n"
-                        "      allow_destroy: ${{ inputs.rerun == 'release' && inputs.allow_destroy || false }}\n"),
-            if_expr="github.event_name == 'push' || inputs.rerun == 'release'",
+                        "      allow_destroy: ${{ inputs.rerun == 'release' && inputs.allow_destroy || false }}\n"
+                        + ("      staging_on_merge: true\n" if a["staging_on_merge"] else "") + trunk_green),
+            **release_gate,
             extra_secrets=("DEPLOY_TOKEN",),
             # OIDC login to the cloud the spec chose (no long-lived keys).
             permissions="    permissions:\n      contents: read\n      id-token: write\n"))
@@ -579,7 +605,7 @@ def plan_files(root, a, force=False):
     """{relpath: (new_content, kind)} with kind in managed | once | merged."""
     root = Path(root)
     out = {".sdlc/sdlc.json": (json.dumps({k: a[k] for k in ("sdlc_repo", "sdlc_ref", "base_branch", "maintain_cron", "stages",
-                                                             "auto_build", "workflows", "models")},
+                                                             "auto_build", "staging_on_merge", "workflows", "models")},
                                           indent=2) + "\n", "managed")}
     once = {
         ".sdlc/owners.yaml": render_owners(a), ".sdlc/jira.yaml": render_jira(a), ".sdlc/build.yaml": render_build(a),

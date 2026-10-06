@@ -11,6 +11,10 @@ argument-hint: "[version=vX.Y.Z] [type=release|hotfix] [rollback=vX.Y.Z]"
 # Prepare a release
 
 Goal: `releases/<version>.md` on a `release/<version>` branch and a PR. The
+release is always a commit already on the base branch (trunk-based: no
+release branches, no cherry-picks); the `release/<version>` branch only
+carries the record. Every merge to the base branch is already on staging
+(`staging_on_merge`); a release is what takes one to production. The
 owner's merge approves the record; the release workflow then tags it,
 creates the GitHub release, deploys to staging with the project's
 `deploy_command`, and deploys to production only after the reviewers of the
@@ -46,7 +50,18 @@ Arguments: `$ARGUMENTS`
    Jira `-`.
 4. **Rollback** (`rollback=vX.Y.Z`): the commit is that tag's commit
    (`git rev-list -n1 vX.Y.Z`), type `rollback`, and Changes lists what is
-   being backed out.
+   being backed out. A rollback is released even while the base branch is
+   red; nothing else is (an open `main-red` issue means: fix first).
+5. **Hotfix**: fix forward on the trunk. The fix is a normal story or fix PR
+   merged to the base branch, then released with type `hotfix`; never patch
+   a tag or keep a release branch.
+6. **Feature flags**: for each spec in Changes whose rollout names a flag,
+   check where it stands at this commit: its stories all merged and the
+   flag turned on, or still building with the flag off. List each flag and
+   its state under Risk and rollback ("`bulk_edit_enabled`: off, S3 of S5
+   built"). A spec with stories still to build and **no** flag means
+   half-built behaviour would reach users: say so as the first risk and
+   ask the person whether to wait.
 
 ## Step 2: the version
 

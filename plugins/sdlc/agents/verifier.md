@@ -51,6 +51,10 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
    `.sdlc/build.yaml`, a hand-built standard element (button, input,
    dialog, menu, table and the like) that the library has is a medium
    finding.
+4c. **Feature flag** (when the spec's rollout names one for this story):
+   with the flag off, users see today's behaviour (no new screen, button or
+   route is reachable); tests cover both states; only the story the spec
+   names turns it on. New behaviour reachable with the flag off is high.
 5. **Security** rules the spec lists for this story (SEC-n): input
    validation, no secrets, no unsafe HTML.
 6. **Scope**: changes outside the plan's Files table, or behaviour that no

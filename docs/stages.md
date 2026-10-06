@@ -29,6 +29,11 @@ Jira ticket / document / breach
   -> Maintain: scheduled checks -> breach -> intake -> Plan
 ```
 
+Every project works trunk-based ([trunk-based.md](trunk-based.md)):
+short-lived branches into one always-releasable base branch, feature flags
+for unfinished features, every merge on staging, releases tagged from the
+base branch, and a red base branch stops Build and Deploy.
+
 ## What each stage guarantees
 
 - **Plan**: `validate_intent.py` (structure, owner, record, no placeholders);

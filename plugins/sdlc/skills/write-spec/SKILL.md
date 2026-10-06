@@ -96,6 +96,16 @@ Follow the template's headings exactly, in order.
     the cloud decision is recorded, and builds the others meanwhile.
 - **Design**: components, data flow, interfaces, rollout and rollback.
   Enough for an engineer to plan the build. No code.
+  - **Trunk-based rollout.** Every story merges to the base branch as soon
+    as it is done, and every merge goes to staging, so a feature built over
+    several stories must stay hidden until it is complete. When more than
+    one story changes what users see or do, name a **feature flag** in the
+    rollout: its name (`<feature>_enabled`), default **off**, which stories
+    put their behaviour behind it, the story that turns it on (usually the
+    last), and that a follow-up removes the flag once it is on in
+    production. Read it through the project's one flag helper
+    (`PATTERNS.md`, State and configuration). A one-story change, or one
+    users cannot reach until the last story, needs no flag: say so.
 - **Security considerations**: one row per `sdlc:security-policy` rule
   that applies (`SEC-<n>`), and per `sdlc:infra-policy` rule (`INF-<n>`)
   when there is infrastructure, saying how the design satisfies it. Rules that
