@@ -313,7 +313,7 @@ def render_claude_block(a):
     if s["pr_review"]:
         rows.append("| PR review | story PR opened or pushed | review comment, `review:*` label | `review-gate` passes |")
     if s["test"]:
-        rows.append("| Test | after the review gate | test results | `traceability`, `tests` pass; owner merges |")
+        rows.append("| Test | after the review gate; a test-report PR after each story merges | test results, `test-reports/<plan-id>/` | `traceability`, `tests` pass; owner merges |")
     if s["deploy"]:
         rows.append("| Deploy | `/sdlc:release` | `releases/<version>.md`, tag | release PR merged; production approved in its environment |")
     if s["maintain"]:
@@ -425,7 +425,11 @@ def render_callers(a):
             extra_with=f"      model: {m['build']}\n      spec_file: ${{{{ inputs.rerun == 'build' && inputs.file || '' }}}}\n",
             if_expr="github.event_name == 'push' || inputs.rerun == 'build'"))
     if s["test"]:
-        jobs.append("  tests:\n" + call(a, "sdlc-main-tests.yml", if_expr="github.event_name == 'push'"))
+        # The test report of a merged story reads its PRs, checks and test logs.
+        jobs.append("  tests:\n" + call(
+            a, "sdlc-main-tests.yml", if_expr="github.event_name == 'push'",
+            permissions=("    permissions:\n      contents: read\n      actions: read\n      checks: read\n"
+                         "      issues: read\n      pull-requests: read\n")))
     if s["deploy"]:
         jobs.append("  release:\n" + call(
             a, "sdlc-release.yml",

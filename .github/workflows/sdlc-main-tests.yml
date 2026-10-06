@@ -6,6 +6,9 @@ name: "SDLC Test: main"
 #
 # End-to-end tests on main after every merge. Pull requests run the same
 # suite in pr.yml, after the PR review gate (Build -> PR review -> Test).
+# After a story PR merges, the report job writes its test report
+# (test-reports/<plan-id>/: every test case and its status in each testing
+# flow) and opens it as a test-report PR.
 
 on:
   workflow_call:
@@ -106,3 +109,140 @@ jobs:
           path: ${{ steps.stack.outputs.report_path }}
           if-no-files-found: ignore
           retention-days: 30
+
+  report:
+    needs: e2e
+    # Also when the tests failed: the report says so.
+    if: always() && needs.e2e.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read         # the test jobs' logs
+      checks: read          # the story PR's checks
+      issues: read          # the review gate comment
+      pull-requests: read   # the plan and story PRs
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the merged story PR
+        id: find
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+                 -q '([.[] | select(.merged_at != null and (.head.ref | startswith("story/")))][0] // empty) | "\(.number) \(.head.ref)"' \
+                 2>/dev/null || true)
+          if [ -z "$pr" ]; then
+            echo "Not a story PR merge: no test report."; echo "story=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          read -r number head <<<"$pr"
+          # The plan names its branch (story/<jira-key>-<name>, or story/<spec-slug>-s<n> without Jira).
+          plan=$(grep -lx "branch: $head" plans/*.md 2>/dev/null | head -n1 || true)
+          if [ -z "$plan" ] && [[ "$head" =~ ^story/([a-z][a-z0-9]*-[0-9]+)(-|$) ]]; then
+            key=$(tr '[:lower:]' '[:upper:]' <<<"${BASH_REMATCH[1]}")   # older plans: by Jira key
+            plan=$(grep -lx "jira: $key" plans/*.md 2>/dev/null | head -n1 || true)
+          fi
+          if [ -z "$plan" ]; then
+            echo "::notice::story PR #$number ($head) has no plan in plans/: no test report."
+            echo "story=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          { echo "story=true"; echo "number=$number"; echo "plan=$plan"; echo "id=$(basename "$plan" .md)"; } >> "$GITHUB_OUTPUT"
+          echo "Story PR #$number, plan $plan"
+
+      - name: Collect the story's test evidence
+        id: evidence
+        if: steps.find.outputs.story == 'true'
+        env:
+          PR: ${{ steps.find.outputs.number }}
+          ID: ${{ steps.find.outputs.id }}
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/report"; mkdir -p "$d"
+          logs() { curl -sSfL -H "Authorization: Bearer $GH_TOKEN" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/jobs/$1/logs" > "$2" || rm -f "$2"; }
+          gh pr view "$PR" --json number,title,url,body,comments,headRefName,mergedAt,mergeCommit > "$d/story-pr.json"
+          # gh pr checks exits non-zero when a check failed or is pending; its JSON is still complete.
+          gh pr checks "$PR" --json name,state,link > "$d/checks.json" 2>/dev/null || true
+          link=$(gh pr checks "$PR" --json name,link -q '[.[] | select(.name | test("(^|/ )e2e$")) | .link][0] // ""' 2>/dev/null || true)
+          plan_pr=$(gh pr list --state merged --head "plan/$ID" --json number -q '.[0].number // empty' 2>/dev/null || true)
+          if [ -n "$plan_pr" ]; then gh pr view "$plan_pr" --json number,url,body,mergedAt > "$d/plan-pr.json"; fi
+          if [[ "$link" =~ /job/([0-9]+) ]]; then logs "${BASH_REMATCH[1]}" "$d/pr-tests.log"; fi
+          main=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" \
+                   -q '([.jobs[] | select(.name | test("(^|/ )e2e$"))][0] // empty) | "\(.id) \(.html_url)"' 2>/dev/null || true)
+          read -r main_job main_url <<<"${main:-}" || true
+          if [ -n "${main_job:-}" ]; then logs "$main_job" "$d/main-tests.log"; fi
+          echo "main_url=${main_url:-}" >> "$GITHUB_OUTPUT"
+
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        if: steps.find.outputs.story == 'true'
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint short-lived GitHub App token
+        id: app
+        if: steps.find.outputs.story == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
+
+      - name: Check out the sdlc plugin (pinned)
+        if: steps.find.outputs.story == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Write the test report
+        id: write
+        if: steps.find.outputs.story == 'true'
+        env:
+          PLAN: ${{ steps.find.outputs.plan }}
+          PR: ${{ steps.find.outputs.number }}
+          MAIN_RESULT: ${{ needs.e2e.result }}
+          MAIN_URL: ${{ steps.evidence.outputs.main_url }}
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/report"
+          args=()
+          for pair in --story-pr=story-pr.json --story-checks=checks.json --plan-pr=plan-pr.json \
+                      --pr-log=pr-tests.log --main-log=main-tests.log; do
+            if [ -s "$d/${pair#*=}" ]; then args+=("${pair%%=*}" "$d/${pair#*=}"); fi
+          done
+          folder=$(python3 "$PLUGIN_DIR/skills/build-story/scripts/test_report.py" --plan "$PLAN" "${args[@]}" \
+                     --main-result "$MAIN_RESULT" --main-url "$MAIN_URL")
+          rm -rf .sdlc-plugin
+          field() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$folder/summary.json" "$1"; }
+          story=$(field story); title=$(field title); result=$(field result); tests=$(field tests)
+          {
+            echo "Test report for **$story: $title**, written after story PR #$PR merged: \`$folder/\`."
+            echo
+            echo "Result: **$(tr '[:lower:]' '[:upper:]' <<<"$result")**, $tests test cases. See \`$folder/README.md\` for each testing flow and \`$folder/test-cases.md\` for every test."
+            echo
+            echo "Merge to keep it in the repo; it changes nothing else."
+          } > "$RUNNER_TEMP/report-body.md"
+          { echo "folder=$folder"; echo "title=$story $title"; } >> "$GITHUB_OUTPUT"
+
+      - name: Open the test-report PR
+        if: steps.find.outputs.story == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+          branch: test-report/${{ steps.find.outputs.id }}
+          base: ${{ inputs.base_branch }}
+          add-paths: test-reports/
+          commit-message: |
+            test-report: ${{ steps.write.outputs.title }}
+
+            Written after story PR #${{ steps.find.outputs.number }} merged (${{ github.sha }}).
+          title: "test-report: ${{ steps.write.outputs.title }}"
+          body-path: ${{ runner.temp }}/report-body.md
+          labels: test-report

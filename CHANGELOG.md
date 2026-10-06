@@ -4,6 +4,32 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.18.0 (2026-10-06)
+
+- **A test report for every merged story.** After a story PR merges and the
+  tests on main have run, the new `report` job in `sdlc-main-tests` writes
+  `test-reports/<plan-id>/`: every test named for the story with its status
+  in Build, the PR and main (`test-cases.md`), the result of each testing
+  flow with links to the CI jobs and the runners' summary lines
+  (`README.md`), and the plan review, verifier report and review gate
+  (`review-findings.md`). It rebuilds the index `test-reports/README.md` and
+  opens the report as a `test-report/<plan-id>` PR, labelled `test-report`.
+  Other merges are skipped. New script:
+  `skills/build-story/scripts/test_report.py` (standard library only).
+- CI logs give counts, not test names, so each test shows the result of the
+  run that included it; a test the plan names but the repo lacks shows as
+  missing.
+
+**Upgrading**
+
+1. `/sdlc:init upgrade=v0.18.0` (or `init_project.py --upgrade v0.18.0`)
+   and merge the PR. It gives the `tests` job of `sdlc-push.yml` read access
+   to actions, checks, issues and pull requests, which the report needs. A
+   caller left on the old permissions fails to start the `v0.18.0` tests
+   workflow, so do not move `sdlc_ref` by hand.
+2. Optional: add `test-reports/` to `.github/CODEOWNERS` if someone other
+   than the default owner should merge the reports.
+
 ## v0.17.0 (2026-10-05)
 
 - **The marketplace moved to `chimera-technologies/sdlc-marketplace`.** The

@@ -30,6 +30,8 @@ ns = load("next_story", PLUGIN / "skills" / "build-story" / "scripts" / "next_st
 js = load("jira_story", PLUGIN / "skills" / "build-story" / "scripts" / "jira_story.py")
 RPR = PLUGIN / "skills" / "review-plan" / "scripts" / "render_plan_review.py"
 rpr = load("render_plan_review", RPR)
+TR = PLUGIN / "skills" / "build-story" / "scripts" / "test_report.py"
+tr = load("test_report", TR)
 
 TEST_FILE = '''
 test("S1 AC-1: only the customer's own claims", () => {});
@@ -288,6 +290,151 @@ class PlanWithoutJiraTest(Repo):
     def test_jira_must_be_a_key_or_none(self):
         _, errors, _ = vp.validate(self.plan(self.plan_text.replace("jira: CLM-483", "jira: nope")), self.root)
         self.assertError(errors, "Jira key (ABC-123) or none")
+
+
+class TestReportTest(Repo):
+    """test_report.py: the test report of a merged story, from its plan, PRs and CI runs."""
+
+    ROWS = ReviewFindingsTest.ROWS
+    with_findings = ReviewFindingsTest.with_findings
+
+    TESTS = TEST_FILE + (
+        'describe("S1 claim status API", () => {});\n'
+        'test("S1 EC-1: two accounts, one list", () => {});\n'
+        'def test_s1_bug_1_never_403(): pass\n'
+        'it("S1 harness: the customer\'s token is required", () => {});\n'
+        'test("S10 AC-1: another story", () => {});\n')
+    STORY_BODY = ("**S1: Customer claim status endpoint**, built automatically.\n\nRESULT: PASS\n\n"
+                  "| AC | Criterion | Test file | Test | Passing |\n|---|---|---|---|---|\n"
+                  "| AC-1 | own claims | t.py | S1 AC-1 | yes |\n| AC-2 | codes | t.py | S1 AC-2 | yes |\n"
+                  "| AC-3 | logged | t.py | S1 AC-3 | yes |\n\n### Verifier report\n\nVERDICT: PASS. All good.\n\n"
+                  "Plan: `plans/x.md`\n\n<details><summary>Evidence</summary>\n\n"
+                  "- Run: https://github.com/o/r/actions/runs/42 (transcript artifact)\n</details>\n")
+    PLAN_BODY = ("Plan for S1.\n\n### Plan review: ⚠️ concerns\n\nPotential bugs: 0 critical · 1 high.\n\n"
+                 "### Review checklist\n- [ ] Every acceptance criterion has a test\n")
+
+    def setUp(self):
+        super().setUp()
+        self.plan_path = self.with_findings()
+        (self.root / "tests" / "api" / "test_customer_status.py").write_text(self.TESTS, encoding="utf-8")
+        self.files = {}
+
+    def json_file(self, name, data):
+        p = self.root / name
+        p.write_text(json.dumps(data), encoding="utf-8")
+        return str(p)
+
+    def checks(self, e2e="SUCCESS"):
+        link = "https://github.com/o/r/actions/runs/7/job/"
+        return [{"name": "pr / review-gate", "state": "SUCCESS", "link": link + "1"},
+                {"name": "pr / traceability", "state": "SUCCESS", "link": link + "2"},
+                {"name": "pr / e2e", "state": e2e, "link": link + "3"},
+                {"name": "pr / advisory (code-review)", "state": "SUCCESS", "link": link + "4"},
+                {"name": "spec-check / validate", "state": "SKIPPED", "link": link + "5"}]
+
+    def report(self, *extra, e2e="SUCCESS", main="success", evidence=True):
+        args = ["--root", str(self.root), "--plan", str(self.plan_path), "--date", "2026-10-06", *extra]
+        if evidence:
+            log = self.root / "pr.log"
+            log.write_text("2026-10-05T16:22:10.1Z \x1b[32m Tests  5 passed (5)\x1b[39m\n2026-10-05T16:22:11.1Z noise\n",
+                           encoding="utf-8")
+            args += ["--story-pr", self.json_file("story.json", {
+                         "number": 17, "url": "https://github.com/o/r/pull/17", "body": self.STORY_BODY,
+                         "mergedAt": "2026-10-05T16:20:45Z", "mergeCommit": {"oid": "2d0bb76abc"},
+                         "comments": [{"body": "unrelated"},
+                                      {"body": "<!-- sdlc-review-gate -->\n### Conformance review: ✅ clean\n\n0 high"}]}),
+                     "--story-checks", self.json_file("checks.json", self.checks(e2e)),
+                     "--plan-pr", self.json_file("plan.json", {"number": 13, "url": "https://github.com/o/r/pull/13",
+                                                               "body": self.PLAN_BODY, "mergedAt": "2026-10-05T13:37:33Z"}),
+                     "--pr-log", str(log), "--main-result", main, "--main-url", "https://github.com/o/r/actions/runs/8/job/9"]
+        with mock.patch("sys.stdout"):
+            self.assertEqual(tr.main(args), 0)
+        folder = self.root / "test-reports" / "claims-status-self-service-s1"
+        self.files = {p.name: p.read_text(encoding="utf-8") for p in folder.iterdir()}
+        return json.loads(self.files["summary.json"])
+
+    def test_all_flows_passing(self):
+        summary = self.report()
+        self.assertEqual((summary["result"], summary["tests"], summary["jira"]), ("pass", 6, "CLM-483"))
+        readme, cases = self.files["README.md"], self.files["test-cases.md"]
+        self.assertIn("[#17](https://github.com/o/r/pull/17)", readme)
+        self.assertIn("merged 2026-10-05 as `2d0bb76`", readme)
+        self.assertIn("[build run](https://github.com/o/r/actions/runs/42)", readme)
+        self.assertIn("| 3c | PR tests | ✅ pass | [job](https://github.com/o/r/actions/runs/7/job/3) |", readme)
+        self.assertIn("Advisory: `pr / advisory (code-review)`", readme)
+        self.assertIn("\nTests  5 passed (5)\n", readme)
+        self.assertNotIn("noise", readme)
+        self.assertNotIn("\x1b", readme)
+        self.assertNotIn("Needs attention", readme)
+        self.assertLess(cases.index("| AC-1 |"), cases.index("| AC-2 |"))
+        self.assertLess(cases.index("| AC-3 |"), cases.index("| EC-1 |"))
+        self.assertIn("| BUG-1 | test_s1_bug_1_never_403 | tests/api/test_customer_status.py | ✅ | ✅ | ✅ |", cases)
+        self.assertIn("S1 harness: the customer's token is required", cases)
+        self.assertNotIn("claim status API", cases)
+        self.assertNotIn("S10", cases)
+
+    def test_review_findings_file(self):
+        self.report()
+        text = self.files["review-findings.md"]
+        self.assertIn("### Plan review: ⚠️ concerns", text)
+        self.assertNotIn("Review checklist", text)
+        self.assertIn("| EC-1 | Customer with two accounts |", text)
+        self.assertIn("VERDICT: PASS. All good.", text)
+        self.assertNotIn("Plan: `plans/x.md`", text)
+        self.assertIn("### Conformance review: ✅ clean", text)
+        self.assertNotIn("sdlc-review-gate", text)
+
+    def test_failures_and_missing_tests(self):
+        (self.root / "tests" / "api" / "test_customer_status.py").write_text(TEST_FILE, encoding="utf-8")
+        summary = self.report(e2e="FAILURE", main="failure")
+        self.assertEqual(summary["result"], "fail")
+        cases, readme = self.files["test-cases.md"], self.files["README.md"]
+        self.assertIn("| AC-1 | S1 AC-1: only the customer's own claims | tests/api/test_customer_status.py | ✅ | ❌ | ❌ |", cases)
+        self.assertIn("| EC-1 | S1 EC-1: (no test found) | — | ❌ missing | ❌ missing | ❌ missing |", cases)
+        self.assertIn("## Needs attention", readme)
+        self.assertIn("**FAIL**", readme)
+
+    def test_only_the_plan_is_unknown(self):
+        summary = self.report(evidence=False)
+        self.assertEqual(summary["result"], "unknown")
+        self.assertIn("| AC-1 | S1 AC-1: only the customer's own claims | tests/api/test_customer_status.py | ❔ | ❔ | ❔ |",
+                      self.files["test-cases.md"])
+        self.assertIn("No plan review found", self.files["review-findings.md"])
+
+    def test_index_lists_every_story_in_order(self):
+        self.report()
+        other = self.root / "test-reports" / "claims-status-self-service-s10"
+        other.mkdir()
+        (other / "summary.json").write_text(json.dumps({"story": "S10", "title": "Later", "jira": "none", "tests": 2,
+                                                        "result": "fail", "date": "2026-10-07"}), encoding="utf-8")
+        index = tr.render_index(self.root / "test-reports")
+        self.assertLess(index.index("[S1: Customer claim status endpoint in claims-core]"), index.index("[S10: Later]"))
+        self.assertIn("| [S10: Later](claims-status-self-service-s10/README.md) | — | 2 | ❌ fail | 2026-10-07 |", index)
+        self.assertIn("| CLM-483 | 6 | ✅ pass |", (self.root / "test-reports" / "README.md").read_text(encoding="utf-8"))
+
+    def test_test_names_in_any_language_style(self):
+        (self.root / "tests" / "api" / "s.go").write_text("func TestS1Ac2Codes(t *testing.T) {}\nfunc TestS12Other(t *testing.T) {}\n",
+                                                          encoding="utf-8")
+        names = [n for n, _ in tr.story_tests(self.root, "S1")]
+        self.assertIn("TestS1Ac2Codes", names)
+        self.assertNotIn("TestS12Other", names)
+        self.assertEqual(tr.test_id("S1", "TestS1Ac2Codes"), "AC-2")
+        self.assertEqual(tr.test_id("S1", "test_s1_bug_1_never_403"), "BUG-1")
+        self.assertIsNone(tr.test_id("S1", "S1 harness: x"))
+
+    def test_runner_summaries(self):
+        log = ("Ran 12 tests in 0.3s\nOK (skipped=1)\n===== 5 passed, 1 failed in 2.31s =====\n"
+               "Tests run: 9, Failures: 0, Errors: 0\nok  \texample.com/pkg\t0.012s\nPassed!  - Failed: 0, Passed: 4\n"
+               "compiling...\n")
+        self.assertEqual(tr.summary_lines(log), ["Ran 12 tests in 0.3s", "OK (skipped=1)", "===== 5 passed, 1 failed in 2.31s =====",
+                                                 "Tests run: 9, Failures: 0, Errors: 0", "ok  \texample.com/pkg\t0.012s",
+                                                 "Passed!  - Failed: 0, Passed: 4"])
+
+    def test_cli_needs_the_plan(self):
+        r = subprocess.run([sys.executable, str(TR), "--root", str(self.root), "--plan", "plans/none.md"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not found", r.stderr)
 
 
 class NextStoryTest(Repo):
