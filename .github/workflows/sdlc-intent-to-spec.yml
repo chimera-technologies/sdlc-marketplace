@@ -138,6 +138,7 @@ jobs:
       # POC: Claude subscription token from `claude setup-token`. For shared
       # or production use, set ANTHROPIC_API_KEY instead.
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - name: Scope the App token to this repo and the plugin repo
         id: app-repos
@@ -183,15 +184,26 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: AI budget check (spec)
+        id: budget-spec
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: spec
+          token: ${{ steps.app.outputs.token }}
+
       - name: Draft spec with write-spec skill (headless)
         env:
+          AI_BUDGET: ${{ steps.budget-spec.outputs.flag }}
           SDLC_WRITE_ALLOW: "specs/"
           SLUG: ${{ steps.meta.outputs.slug }}
         run: |
           set -euo pipefail
           # Claude holds no GitHub or Jira token; the App token is only used
           # by the PR step below.
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
           claude -p "/sdlc:write-spec mode=headless intent=$INTENT_FILE" \
+            "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
             --max-turns 60 \
@@ -201,6 +213,15 @@ jobs:
             > "$RUNNER_TEMP/spec-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/spec-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
           [ -s "specs/$SLUG.md" ] || { echo "::error::Claude did not write specs/$SLUG.md"; exit 1; }
+
+      - name: Record AI spend (spec)
+        if: always() && steps.budget-spec.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: spec
+          transcript: ${{ runner.temp }}/spec-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
 
       - name: Validate spec
         id: check
@@ -233,16 +254,27 @@ jobs:
             echo "reviewers=$reviewers"; echo "team_reviewers=$team_reviewers"
           } >> "$GITHUB_OUTPUT"
 
+      - name: AI budget check (review-spec)
+        id: budget-review-spec
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: review-spec
+          token: ${{ steps.app.outputs.token }}
+
       - name: Adversarial pre-screen with review-spec skill (headless)
         continue-on-error: true   # a failed review becomes "review:failed", not a failed run
         env:
+          AI_BUDGET: ${{ steps.budget-review-spec.outputs.flag }}
           SDLC_WRITE_ALLOW: ".sdlc-output/spec-review.json"
           SLUG: ${{ steps.meta.outputs.slug }}
         run: |
           set -euo pipefail
           # Fresh Claude session: it sees only the files, not the author's reasoning.
           # Large or high-risk specs: the skill runs a review panel (Claude Code workflow).
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
           claude -p "/sdlc:review-spec mode=headless spec=specs/$SLUG.md" \
+            "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
             --max-turns 40 \
@@ -252,17 +284,38 @@ jobs:
             > "$RUNNER_TEMP/review-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
 
+      - name: Record AI spend (review-spec)
+        if: always() && steps.budget-review-spec.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: review-spec
+          transcript: ${{ runner.temp }}/review-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
+
+      - name: AI budget check (design)
+        id: budget-design
+        if: inputs.ui_design && steps.check.outputs.valid == 'true'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: design
+          token: ${{ steps.app.outputs.token }}
+
       - name: Draft UI mockups with design-ui skill (headless)
         id: design
         if: inputs.ui_design && steps.check.outputs.valid == 'true'
         continue-on-error: true   # a failed design is left out of the PR, not a failed run
         env:
+          AI_BUDGET: ${{ steps.budget-design.outputs.flag }}
           SDLC_WRITE_ALLOW: "designs/"
           SLUG: ${{ steps.meta.outputs.slug }}
         run: |
           set -euo pipefail
           # Fresh session again; it reads the spec file, writes HTML only.
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
           claude -p "/sdlc:design-ui mode=headless spec=specs/$SLUG.md" \
+            "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
             --max-turns 60 \
@@ -271,6 +324,15 @@ jobs:
             --output-format stream-json --verbose \
             > "$RUNNER_TEMP/design-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/design-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Record AI spend (design)
+        if: always() && steps.budget-design.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: design
+          transcript: ${{ runner.temp }}/design-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
 
       - name: Render and validate the UI mockups
         id: mockups

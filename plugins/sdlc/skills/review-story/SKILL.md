@@ -27,6 +27,12 @@ Arguments: `$ARGUMENTS` (`base` defaults to `origin/main`).
    `story/<spec-slug>-s<n>` without Jira); the plan is the file in `plans/`
    whose `branch:` is this branch. From the plan, read its spec
    (`specs/<slug>.md`), the story's acceptance criteria and requirements.
+   **A fix PR** (branch `fix/<name>`, the fix lane) has no plan or spec:
+   read the PR's description for the problem, and skip the plan, spec and
+   design checks below. Check instead that the change is small and does
+   only what the description says (anything that is new behaviour rather
+   than a fix is a medium finding: it belongs in a story), that a test
+   reproduces the problem and now passes, and every rule from 5 onwards.
 3. The design, if `designs/<slug>/design.md` exists: the screens whose
    Stories column names this story, and their PNGs (Read them; you can see
    images). Its Tokens section.

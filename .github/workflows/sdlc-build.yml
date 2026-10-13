@@ -219,13 +219,24 @@ jobs:
           echo "Jira key for $ID: $key"
           echo "key=$key" >> "$GITHUB_OUTPUT"
 
+      - name: AI budget check (plan)
+        id: budget-plan
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: plan
+          token: ${{ steps.app.outputs.token }}
+
       - name: Plan the story with build-story (headless)
         env:
+          AI_BUDGET: ${{ steps.budget-plan.outputs.flag }}
           JIRA_KEY: ${{ steps.jira.outputs.key }}
         run: |
           set -euo pipefail
           mkdir -p plans .sdlc-output
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
           claude -p "/sdlc:build-story mode=plan spec=$SPEC story=$STORY jira=$JIRA_KEY" \
+            "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
             --max-turns 80 \
@@ -236,14 +247,34 @@ jobs:
           tail -n1 "$RUNNER_TEMP/plan-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
           [ -s "plans/$ID.md" ] || { echo "::error::Claude did not write plans/$ID.md"; exit 1; }
 
+      - name: Record AI spend (plan)
+        if: always() && steps.budget-plan.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: plan
+          transcript: ${{ runner.temp }}/plan-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
+
+      - name: AI budget check (review-plan)
+        id: budget-review-plan
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: review-plan
+          token: ${{ steps.app.outputs.token }}
+
       - name: Review the plan for edge cases and bugs (review-plan, headless)
         continue-on-error: true   # a failed review shows as "did not run" in the PR, never blocks it
         env:
+          AI_BUDGET: ${{ steps.budget-review-plan.outputs.flag }}
           SDLC_WRITE_ALLOW: ".sdlc-output/plan-review.json"
         run: |
           set -euo pipefail
           # Fresh session: the reviewer is not the author. Large or high-risk plans get the review panel workflow.
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
           claude -p "/sdlc:review-plan mode=headless plan=plans/$ID.md" \
+            "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
             --max-turns 40 \
@@ -252,6 +283,15 @@ jobs:
             --output-format stream-json --verbose \
             > "$RUNNER_TEMP/plan-review-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/plan-review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Record AI spend (review-plan)
+        if: always() && steps.budget-review-plan.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: review-plan
+          transcript: ${{ runner.temp }}/plan-review-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
 
       - name: Number the review findings
         id: findings
@@ -264,13 +304,26 @@ jobs:
           echo "Plan review: $review; must fix: $count"
           { echo "review=$review"; echo "count=$count"; } >> "$GITHUB_OUTPUT"
 
+      - name: AI budget check (plan-revise)
+        id: budget-plan-revise
+        if: steps.findings.outputs.count != '0'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: plan-revise
+          token: ${{ steps.app.outputs.token }}
+
       - name: Fix the findings in the plan (build-story mode=revise, headless)
         if: steps.findings.outputs.count != '0'
         continue-on-error: true   # validation below reports anything left unhandled
+        env:
+          AI_BUDGET: ${{ steps.budget-plan-revise.outputs.flag }}
         run: |
           set -euo pipefail
           cp "$RUNNER_TEMP/must-fix.json" .sdlc-output/must-fix.json
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
           claude -p "/sdlc:build-story mode=revise plan=plans/$ID.md review=.sdlc-output/must-fix.json" \
+            "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
             --max-turns 60 \
@@ -279,6 +332,15 @@ jobs:
             --output-format stream-json --verbose \
             > "$RUNNER_TEMP/plan-revise-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/plan-revise-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Record AI spend (plan-revise)
+        if: always() && steps.budget-plan-revise.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: plan-revise
+          transcript: ${{ runner.temp }}/plan-revise-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
 
       - name: Validate the plan and build the PR body
         id: check
@@ -486,12 +548,24 @@ jobs:
           # Exit 3 only means Ponytail is not active yet; it loads with the Claude session below.
           python3 "$SCRIPTS/build_preflight.py" || [ $? -eq 3 ]
 
+      - name: AI budget check (build)
+        id: budget-build
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: build
+          token: ${{ steps.app.outputs.token }}
+
       - name: Build the story with build-story (headless)
         continue-on-error: true   # an incomplete build still opens a draft PR
+        env:
+          AI_BUDGET: ${{ steps.budget-build.outputs.flag }}
         run: |
           set -euo pipefail
           mkdir -p .sdlc-output
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
           claude -p "/sdlc:build-story mode=build plan=$PLAN" \
+            "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --plugin-dir "$RUNNER_TEMP/ponytail" \
             --model "$MODEL" \
@@ -502,6 +576,15 @@ jobs:
             --output-format stream-json --verbose \
             > "$RUNNER_TEMP/build-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/build-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Record AI spend (build)
+        if: always() && steps.budget-build.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: build
+          transcript: ${{ runner.temp }}/build-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
 
       - name: Check what changed and build the PR body
         id: check

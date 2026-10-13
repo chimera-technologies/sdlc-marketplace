@@ -191,18 +191,31 @@ jobs:
       # no GitHub or Jira token; Write/Edit are limited to SDLC_WRITE_ALLOW by
       # the plugin's headless write guard, and only the file named in
       # add-paths below is ever committed.
+      - name: AI budget check (intake)
+        id: budget-intake
+        if: steps.dedup.outputs.existing == ''
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: intake
+          token: ${{ steps.app.outputs.token }}
+
       - name: Draft intent with write-intent skill (headless)
         id: claude
         if: steps.dedup.outputs.existing == ''
         env:
-          # POC: Claude subscription token from `claude setup-token`. For shared
-          # or production use, set ANTHROPIC_API_KEY instead.
+          AI_BUDGET: ${{ steps.budget-intake.outputs.flag }}
+          # A Console API key (ANTHROPIC_API_KEY) is recommended for CI; a
+          # subscription token from `claude setup-token` also works. Set one.
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
           transcript="$RUNNER_TEMP/intent-transcript.jsonl"
           echo "transcript=$transcript" >> "$GITHUB_OUTPUT"
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
           claude -p "/sdlc:write-intent mode=headless source=$SOURCE record_id=$RECORD_ID fingerprint=${FINGERPRINT:-none} input=.sdlc-input/record.json" \
+            "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
             --max-turns 30 \
@@ -211,6 +224,15 @@ jobs:
             --output-format stream-json --verbose \
             > "$transcript"
           tail -n1 "$transcript" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Record AI spend (intake)
+        if: always() && steps.budget-intake.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: intake
+          transcript: ${{ runner.temp }}/intent-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
 
       - name: Collect result
         id: result

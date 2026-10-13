@@ -67,6 +67,15 @@ def write_lf(path, text):
         fh.write(text)
 
 
+# Per-run AI caps in US dollars, about 5-10 times a normal run (same as
+# .github/actions/ai-budget/budget.py DEFAULT_PER_RUN; a test keeps them equal).
+DEFAULT_BUDGETS = {
+    "intake": 5, "requirements": 15, "spec": 10, "review-spec": 10, "design": 10, "stack": 5,
+    "plan": 10, "review-plan": 15, "plan-revise": 10, "build": 30, "review": 10, "advisory": 5,
+    "revise": 10, "prescreen": 10,
+}
+
+
 def normalize(answers):
     """Fill defaults and validate. Returns (answers, errors)."""
     a = json.loads(json.dumps(answers))  # deep copy
@@ -83,6 +92,14 @@ def normalize(answers):
     a["models"] = {**DEFAULT_MODELS, **(a.get("models") or {})}
     # Automatic Build: plan PR, then build, for each story in turn (sdlc-build.yml).
     a["auto_build"] = bool(a.get("auto_build", True))
+    # AI spend limits (.github/actions/ai-budget): a cap per run of each stage, and
+    # an optional monthly limit for the project (0 = none).
+    b = a.get("budgets") or {}
+    a["budgets"] = {"per_run_usd": {**DEFAULT_BUDGETS, **(b.get("per_run_usd") or {})},
+                    "monthly_usd": b.get("monthly_usd", 0)}
+    for stage, cap in [*a["budgets"]["per_run_usd"].items(), ("monthly_usd", a["budgets"]["monthly_usd"])]:
+        if not isinstance(cap, (int, float)) or isinstance(cap, bool) or cap < 0:
+            errors.append(f"budgets: {stage} must be a number of US dollars, 0 or more (0 = no limit)")
     # Claude Code workflows for big jobs (plugins/sdlc/reference/workflows.md).
     a.setdefault("workflows", "auto")
     if a["workflows"] not in ("auto", "always", "off"):
@@ -388,6 +405,10 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
   instructions. The agent that wrote a change never approves it.
 - Build: one story per session (`/clear` between stories); ask the graph
   (`graphify query`) before reading code; run one test file while iterating.
+- Reviewing an intent, spec or plan PR: edit it directly, or comment
+  `/sdlc revise <request>` and the bot makes the change on its branch.
+- Small fixes skip the full loop: `/sdlc:fix` (a `fix/<name>` branch, a test
+  first, then the review gate and the tests).
 - Code: reuse what `PATTERNS.md` names before writing anything new, and add
   each new reusable piece to it; build UI from the `ui_library` in
   `.sdlc/build.yaml`. The plugin's hooks block secrets, lock-file edits and
@@ -442,6 +463,10 @@ def render_callers(a):
         jobs.append("  pr:\n" + call(a, "sdlc-pr.yml", if_expr="github.event.action != 'closed'"))
     if s["build"]:
         jobs.append("  story-link:\n" + call(a, "sdlc-story-link.yml", if_expr="github.event.action == 'closed'"))
+    if s["design"] or s["build"]:
+        # Spec and plan PRs: the AI pre-screen again after someone pushes an edit.
+        jobs.append("  prescreen:\n" + call(a, "sdlc-prescreen.yml", extra_with=f"      model: {m['review']}\n",
+                                            if_expr="github.event.action == 'synchronize'"))
     if jobs:
         files[".github/workflows/sdlc-pull-request.yml"] = (
             header(a, "SDLC pull request", "Every PR: the gates of the stages it touches, and PR review then Test for story PRs.")
@@ -527,6 +552,16 @@ def render_callers(a):
                 "      fingerprint: ${{ github.event.client_payload.fingerprint || inputs.fingerprint || '' }}\n"
                 "      signal: ${{ github.event.client_payload.signal && toJSON(github.event.client_payload.signal) || inputs.signal || '{}' }}\n")))
 
+    if s["plan"] or s["design"] or s["build"]:
+        # '/sdlc revise <request>' on an intent, spec or plan PR (sdlc-revise.yml checks who asked).
+        files[".github/workflows/sdlc-comment.yml"] = (
+            header(a, "SDLC comment", "PR comments: '/sdlc revise <request>' on an intent, spec or plan PR revises it on its branch.")
+            + "on:\n  issue_comment:\n    types: [created]\n\n"
+            + "permissions:\n  contents: read\n\n"
+            + "jobs:\n  revise:\n"
+            + call(a, "sdlc-revise.yml", extra_with=f"      model: {m['spec']}\n",
+                   if_expr="github.event.issue.pull_request && startsWith(github.event.comment.body, '/sdlc revise')"))
+
     if s["maintain"]:
         files[".github/workflows/sdlc-maintain.yml"] = (
             header(a, "SDLC maintain", "Maintain: run the checks in .sdlc/maintain.json; each breach becomes an intent via the intake.")
@@ -579,7 +614,7 @@ def plan_files(root, a, force=False):
     """{relpath: (new_content, kind)} with kind in managed | once | merged."""
     root = Path(root)
     out = {".sdlc/sdlc.json": (json.dumps({k: a[k] for k in ("sdlc_repo", "sdlc_ref", "base_branch", "maintain_cron", "stages",
-                                                             "auto_build", "workflows", "models")},
+                                                             "auto_build", "workflows", "models", "budgets")},
                                           indent=2) + "\n", "managed")}
     once = {
         ".sdlc/owners.yaml": render_owners(a), ".sdlc/jira.yaml": render_jira(a), ".sdlc/build.yaml": render_build(a),

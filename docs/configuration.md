@@ -16,6 +16,7 @@ files; `sdlc.json` is regenerated from, the rest are the project's to edit
 | `models` | `intake`, `spec`, `review`, `build`: the Claude model per headless stage |
 | `workflows` | `auto` (default): big jobs run as Claude Code workflows (parallel agents, then skeptics) above the thresholds in `plugins/sdlc/reference/workflows.md`: large requirement documents (`write-intent`), large or high-risk specs (`review-spec`), large story PRs (`review-story`); `always`; `off` (one session) |
 | `auto_build` | `true` (default): each story gets a plan PR and is built in CI when it merges (`sdlc-build.yml`); `false`: build by hand with `/sdlc:build-story` |
+| `budgets` | AI spend limits for the CI runs (see [AI spend limits](#ai-spend-limits)): `per_run_usd` (a cap per stage) and `monthly_usd` (0 = none) |
 
 Change it and re-run `/sdlc:init` (or `init_project.py --answers`), or move
 the tag with `init_project.py --upgrade vX.Y.Z`.
@@ -57,7 +58,7 @@ not listed here.
 | `test_command` | `npx playwright test`, `pytest -q`, `mvn -B test` | The full suite (required for Test) |
 | `test_file_command` | `pytest -q {file}` | One test file while building (`{file}`) |
 | `report_path` | `playwright-report/` | Uploaded as an artifact after tests |
-| `check_command` | `npx tsc --noEmit && npx eslint .`, `ruff check . && mypy .` | Whole-project static checks: run in Build before the suite, by the verifier, and in CI before `test_command` |
+| `check_command` | `npx tsc --noEmit && npx eslint .`, `npx eslint {files}`, `ruff check {files}` | Static checks: run in Build before the suite, by the verifier, and in CI before `test_command`. With `{files}`, only the code files the change touched are checked (an existing codebase's old problems do not block new work) |
 | `lint_command` | `npx eslint {file}`, `ruff check {file}` | One file (`{file}`), run by the code hooks after every code write; errors go back to Claude |
 | `format_command` | `npx prettier --write {file}`, `ruff format {file}` | One file (`{file}`), run by the code hooks after every code write; never blocks |
 | `ui_library` | `shadcn/ui`, `Angular Material`, `MudBlazor` | The UI component library the spec chose; the build uses it for every standard element |
@@ -142,13 +143,60 @@ signal) on a breach. `source` is `maintain`, `claude-security` or
 `claude-tag`; `fingerprint` (a-z, 0-9, -) deduplicates intents. Test a
 check without sending anything: `python <plugin>/skills/triage/scripts/run_checks.py`.
 
+## AI spend limits
+
+Every headless Claude step in the workflows is wrapped by the `ai-budget`
+action (`.github/actions/ai-budget/`):
+
+- **Per run (hard):** `--max-budget-usd` from `budgets.per_run_usd.<stage>`
+  stops a run that costs more. A stopped build opens a draft PR, a stopped
+  review fails the gate. Defaults are about 5-10 times a normal run
+  (`build` 30, `review` 10, `spec` 10, ...); 0 turns a cap off.
+- **Per month (soft):** each run's cost is added to a monthly issue labelled
+  `sdlc-spend` (total and by stage). With `budgets.monthly_usd` set, AI
+  steps stop once it is reached (the bot comments; at 80% it warns first).
+  Two runs finishing at once can lose one update, so the limit is soft.
+- **Hard ceiling:** the monthly spend limit of the Anthropic Console
+  workspace the `ANTHROPIC_API_KEY` belongs to. Give each project or team
+  its own workspace and key.
+
+With a subscription token the figures are what the runs would cost at API
+prices, not money billed.
+
+```json
+"budgets": {"per_run_usd": {"build": 20, "review": 8}, "monthly_usd": 300}
+```
+
+## Reviewing intent, spec and plan PRs
+
+- **Edit the PR directly**: every later stage reads the merged file, so
+  edits count. The validators run again on every push.
+- **The pre-screen runs again** after new commits on a spec or plan PR
+  (`sdlc-prescreen.yml`), on the PR as it is now, as one comment updated
+  in place.
+- **`/sdlc revise <request>`** as a PR comment (owners, members and
+  collaborators only) has Claude make the change on the PR's branch, then
+  reply with what changed (`sdlc-revise.yml`). On a spec PR the mockups are
+  revised too when the stories or screens change; `/sdlc revise design:
+  <request>` changes only the mockups. Nothing is pushed unless the
+  validators pass, and merging is still the reviewer's decision.
+
+## The fix lane
+
+Small changes that restore behaviour (a bug fix, a typo, a dependency bump)
+do not need an intent, spec and plan: `/sdlc:fix` works on a `fix/<name>`
+branch, writes a failing test first, and opens a PR. The build guard allows
+code on `fix/` branches without a plan; the PR still goes through the review
+gate and the tests (not traceability). A fix PR over `fix_max_lines` (300)
+changed lines gets a warning: bigger changes are stories.
+
 ## Repo variables and secrets
 
 | Name | Kind | Needed for |
 |---|---|---|
 | `SDLC_APP_ID` | variable | every workflow (the sdlc-bot GitHub App) |
 | `SDLC_APP_PRIVATE_KEY` | secret | every workflow |
-| `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | secret | intake, spec, PR review |
+| `ANTHROPIC_API_KEY` (recommended) or `CLAUDE_CODE_OAUTH_TOKEN` | secret | every AI step. Use an API key from an Anthropic Console workspace for CI: it belongs to the organisation and the workspace's spend limit is the hard cost ceiling. A subscription token (`claude setup-token`) belongs to one person and shares their usage limits. Set one, not both |
 | `JIRA_BASE_URL`, `JIRA_USER_EMAIL` | variables | Jira (if enabled) |
 | `JIRA_API_TOKEN` | secret | Jira (if enabled) |
 | `DEPLOY_TOKEN` / `DEPLOY_TARGET` | secret / variable, per environment | `deploy_command` |

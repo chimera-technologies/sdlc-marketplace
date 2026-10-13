@@ -15,7 +15,8 @@ its own. Projects adopt it with `/sdlc:init` (see `docs/adoption.md`).
   advisory, hooks are not)
 - `.github/workflows/sdlc-*.yml`: reusable workflows (`workflow_call`)
   projects call at a pinned tag; `ci.yml`, `evals.yml`, `release-tag.yml`: this repo's own CI and releases
-- `.github/actions/setup-stack/`: installs a project's declared toolchains
+- `.github/actions/setup-stack/`: installs a project's declared toolchains;
+  `.github/actions/ai-budget/`: the per-run and monthly AI spend limits
 - `tests/`, `evals/`, `platform/`, `docs/` (incl. `docs/examples/poc/`)
 
 ## Commands

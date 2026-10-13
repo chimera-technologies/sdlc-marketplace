@@ -1,0 +1,201 @@
+name: "SDLC pre-screen after edits"
+
+# Reusable workflow of the sdlc plugin (workflow_call). Spec and plan PRs: run the AI pre-screen again after new commits.
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+# The bot pre-screens a spec (sdlc:review-spec) or a plan (sdlc:review-plan)
+# when it opens the PR. When someone pushes to that PR afterwards (a
+# reviewer's edit, or a /sdlc revise), the first screen is out of date: this
+# runs it again on the PR as it is now and posts it as one comment, updated
+# in place. A screen, not an approval; it never blocks.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: chimera-technologies/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL (unused here; same inputs as the other callers)"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL (unused here)"
+        type: string
+        default: ""
+      model:
+        description: "Claude model for the pre-screen"
+        type: string
+        default: claude-sonnet-5
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
+  HEAD_REF: ${{ github.head_ref }}
+  PR: ${{ github.event.pull_request.number }}
+
+jobs:
+  prescreen:
+    if: >-
+      github.event.action == 'synchronize'
+      && (startsWith(github.head_ref, 'spec/') || startsWith(github.head_ref, 'plan/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: prescreen-${{ github.event.pull_request.number }}
+      cancel-in-progress: true   # only the newest push matters
+    env:
+      SDLC_HEADLESS: "1"
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      MODEL: ${{ inputs.model }}
+    steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: What to pre-screen
+        id: target
+        run: |
+          set -euo pipefail
+          if [[ "$HEAD_REF" == spec/* ]]; then
+            file="specs/${HEAD_REF#spec/}.md"; kind=spec; out=.sdlc-output/spec-review.json
+            cmd="/sdlc:review-spec mode=headless spec=$file"
+          else
+            file="plans/${HEAD_REF#plan/}.md"; kind=plan; out=.sdlc-output/plan-review.json
+            cmd="/sdlc:review-plan mode=headless plan=$file"
+          fi
+          if [ ! -f "$file" ]; then echo "No $file on this branch: nothing to pre-screen."; echo "kind=" >> "$GITHUB_OUTPUT"; exit 0; fi
+          { echo "kind=$kind"; echo "file=$file"; echo "out=$out"; echo "cmd=$cmd"; } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.target.outputs.kind != ''
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        if: steps.target.outputs.kind != ''
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: AI budget check (prescreen)
+        id: budget-prescreen
+        if: steps.target.outputs.kind != ''
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: prescreen
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Pre-screen the PR as it is now (headless)
+        if: steps.target.outputs.kind != ''
+        continue-on-error: true   # a failed screen is reported as failed, never blocks
+        env:
+          AI_BUDGET: ${{ steps.budget-prescreen.outputs.flag }}
+          SDLC_WRITE_ALLOW: ${{ steps.target.outputs.out }}
+          CMD: ${{ steps.target.outputs.cmd }}
+        run: |
+          set -euo pipefail
+          mkdir -p .sdlc-output
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
+          # Fresh session: it sees only the files, not who changed them or why.
+          claude -p "$CMD" \
+            "${ai_budget[@]}" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --model "$MODEL" \
+            --max-turns 40 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Workflow,ToolSearch" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/prescreen-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/prescreen-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Record AI spend (prescreen)
+        if: always() && steps.budget-prescreen.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: prescreen
+          transcript: ${{ runner.temp }}/prescreen-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Post the pre-screen (one comment, updated in place)
+        if: steps.target.outputs.kind != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          KIND: ${{ steps.target.outputs.kind }}
+          OUT: ${{ steps.target.outputs.out }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$KIND" = spec ]; then
+            verdict=$(python3 "$PLUGIN_DIR/skills/review-spec/scripts/render_review.py" "$OUT" --markdown "$RUNNER_TEMP/screen.md")
+          else
+            verdict=$(python3 "$PLUGIN_DIR/skills/review-plan/scripts/render_plan_review.py" "$OUT" --markdown "$RUNNER_TEMP/screen.md")
+          fi
+          marker="<!-- sdlc-prescreen -->"
+          {
+            echo "$marker"
+            echo "### Pre-screen after the latest edits (\`${SHA::7}\`): $verdict"
+            echo
+            echo "The $KIND changed since the bot first screened it, so it was screened again as it is now. A screen, not an approval."
+            echo
+            cat "$RUNNER_TEMP/screen.md"
+          } > "$RUNNER_TEMP/comment.md"
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+                 --jq "[.[] | select(.body | startswith(\"$marker\"))][0].id // empty")
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@"$RUNNER_TEMP/comment.md" >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$RUNNER_TEMP/comment.md" >/dev/null
+          fi
+          echo "Pre-screen: $verdict"

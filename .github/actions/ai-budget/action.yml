@@ -1,0 +1,40 @@
+name: SDLC AI budget
+description: >-
+  Spend limits around a headless Claude step. mode=check (before the step)
+  outputs the per-run cap as `flag` (--max-budget-usd <n>) and fails when
+  the project's monthly AI limit is spent; mode=record (after the step,
+  always) adds the run's cost to this month's sdlc-spend ledger issue.
+  Limits come from `budgets` in .sdlc/sdlc.json. Used by the sdlc reusable
+  workflows after they check out the plugin into .sdlc-plugin/.
+
+inputs:
+  mode:
+    description: "check or record"
+    required: true
+  stage:
+    description: "The stage (a key of budgets.per_run_usd), e.g. build, review, spec"
+    required: true
+  transcript:
+    description: "record: glob(s) of the step's stream-json transcripts, space separated"
+    default: ""
+  token:
+    description: "A token with Issues write for the ledger (the sdlc-bot App token)"
+    required: true
+
+outputs:
+  flag:
+    description: "--max-budget-usd <n> for the stage, or empty for no cap"
+    value: ${{ steps.budget.outputs.flag }}
+
+runs:
+  using: composite
+  steps:
+    - name: AI budget (${{ inputs.mode }} ${{ inputs.stage }})
+      id: budget
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        MODE: ${{ inputs.mode }}
+        STAGE: ${{ inputs.stage }}
+        TRANSCRIPT: ${{ inputs.transcript }}
+      run: python3 "${{ github.action_path }}/budget.py" "$MODE" --stage "$STAGE" --transcript "$TRANSCRIPT"

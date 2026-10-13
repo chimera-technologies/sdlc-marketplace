@@ -8,9 +8,11 @@ blocked unless:
      preflight found no code to index yet (graphify-out/NO-CODE-YET),
   2. Ponytail is enabled in .claude/settings.json and active this session,
   3. the current git branch is a story branch (story/<jira-key>-<name>, or
-     story/<spec-slug>-s<n> without Jira),
-  4. a plan for that story exists (plans/*.md whose `branch:` is this
-     branch, or, for older plans, whose `jira:` is the branch's key).
+     story/<spec-slug>-s<n> without Jira), or a fix branch (fix/<name>),
+  4. on a story branch, a plan for that story exists (plans/*.md whose
+     `branch:` is this branch, or, for older plans, whose `jira:` is the
+     branch's key). The fix lane (sdlc:fix) needs no plan: its PR still goes
+     through the review gate and the tests.
 Exit 2 blocks the write and tells Claude how to fix it. Everything else
 passes. The build-story skill's preflight script sets up 1 and 2.
 """
@@ -22,6 +24,7 @@ import sys
 from pathlib import Path
 
 STORY_BRANCH_RE = re.compile(r"^story/[a-z0-9]+(?:-[a-z0-9]+)*$")
+FIX_BRANCH_RE = re.compile(r"^fix/[a-z0-9]+(?:-[a-z0-9]+)*$")
 JIRA_BRANCH_RE = re.compile(r"^story/([a-z][a-z0-9]*-\d+)(?:-|$)")
 _PREFLIGHT_PY = Path(__file__).resolve().parents[1] / "skills" / "build-story" / "scripts" / "build_preflight.py"
 PREFLIGHT = f'python "{_PREFLIGHT_PY.as_posix()}"'
@@ -110,10 +113,13 @@ def check(project, rel):
                         "then `/clear`, and start again with /sdlc:build-story.")
     branch = current_branch(project)
     if branch is not None:
-        if not STORY_BRANCH_RE.match(branch):
-            problems.append(f"Branch {branch!r} is not a story branch. Code is written on story/<jira-key>-<name> "
-                            "(or story/<spec-slug>-s<n> without Jira), created by /sdlc:build-story after the "
-                            "plan is approved.")
+        if FIX_BRANCH_RE.match(branch):
+            pass  # the fix lane: small changes, reviewed and tested in their PR, no plan
+        elif not STORY_BRANCH_RE.match(branch):
+            problems.append(f"Branch {branch!r} is not a story or fix branch. Code is written on "
+                            "story/<jira-key>-<name> (or story/<spec-slug>-s<n> without Jira), created by "
+                            "/sdlc:build-story after the plan is approved, or, for a small fix, on fix/<name> "
+                            "(/sdlc:fix).")
         elif plan_for(project, branch) is None:
             problems.append(f"No plan in plans/ for branch {branch!r}. Write and approve the plan first "
                             "(/sdlc:build-story Step 2).")

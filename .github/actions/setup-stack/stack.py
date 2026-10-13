@@ -20,6 +20,8 @@ Standard library only. Exit 1 on an unknown toolchain.
 import argparse
 import importlib.util
 import os
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -64,6 +66,18 @@ def read_stack(root):
     return out, errors
 
 
+def changed_files(root, rng):
+    """Files under build.yaml's code_paths added, changed or renamed in a git range (deleted files left out)."""
+    cfg = load_guard().load_build_config(root) or {}
+    prefixes = [p.strip("/") for p in cfg.get("code_paths") or []]
+    out = subprocess.run(["git", "diff", "--name-only", "--diff-filter=ACMR", rng], cwd=root,
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        raise SystemExit(f"git diff {rng} failed: {out.stderr.strip()[:300]}")
+    return [f for f in out.stdout.splitlines()
+            if f and any(f == p or f.startswith(p + "/") for p in prefixes)]
+
+
 def has_code(root):
     """True if any of build.yaml's code_paths exists (before the first story, none do)."""
     cfg = load_guard().load_build_config(root) or {}
@@ -78,7 +92,12 @@ def main():
                     help="output an empty stack (nothing installed or run) if no code_paths exist yet")
     ap.add_argument("--install-if-code", action="store_true",
                     help="toolchains always, but no install_command until code_paths exist (the build of a first story)")
+    ap.add_argument("--changed", metavar="RANGE",
+                    help="print the files under code_paths changed in a git range (shell-quoted, space separated)")
     args = ap.parse_args()
+    if args.changed:
+        print(" ".join(shlex.quote(f) for f in changed_files(args.root, args.changed)))
+        return 0
     out, errors = read_stack(args.root)
     if args.skip_without_code and not args.require_tests and not has_code(args.root):
         out = {k: "" for k in out}

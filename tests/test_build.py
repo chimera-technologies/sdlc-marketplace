@@ -642,7 +642,17 @@ class BuildGuardTest(Repo):
         text = " ".join(problems)
         self.assertIn("No Graphify graph", text)
         self.assertIn("Ponytail is not enabled", text)
-        self.assertIn("not a story branch", text)
+        self.assertIn("not a story or fix branch", text)
+
+    def test_fix_lane_needs_no_plan_but_still_the_preflight(self):
+        self.ready()
+        (self.root / "plans" / "claims-status-self-service-s1.md").unlink()
+        subprocess.run(["git", "checkout", "-q", "-b", "fix/empty-employee-id"], cwd=self.root, check=True)
+        self.assertEqual(bg.check(self.root, "src/app.js"), [])
+        (self.root / "graphify-out" / "graph.json").unlink()
+        self.assertTrue(any("No Graphify graph" in p for p in bg.check(self.root, "src/app.js")))
+        subprocess.run(["git", "checkout", "-q", "-b", "fix/Bad_Name"], cwd=self.root, check=True)
+        self.assertTrue(any("not a story or fix branch" in p for p in bg.check(self.root, "src/app.js")))
 
     def test_ponytail_enabled_but_not_active(self):
         self.ready()

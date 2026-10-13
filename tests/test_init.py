@@ -23,7 +23,7 @@ ANSWERS = {
     "stack": {"toolchains": ["python@3.12"], "install_command": "pip install -r requirements.txt",
               "test_command": "pytest -q", "test_file_command": "pytest -q {file}"},
 }
-CALLERS = ["sdlc-pull-request.yml", "sdlc-push.yml", "sdlc-intake.yml", "sdlc-maintain.yml"]
+CALLERS = ["sdlc-pull-request.yml", "sdlc-push.yml", "sdlc-intake.yml", "sdlc-maintain.yml", "sdlc-comment.yml"]
 
 
 def yaml_load(text):
