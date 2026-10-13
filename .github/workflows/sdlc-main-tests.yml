@@ -73,6 +73,8 @@ jobs:
           repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # history for check_command {files}
 
       - name: Check out the sdlc plugin (pinned)
         uses: actions/checkout@v4
@@ -99,7 +101,16 @@ jobs:
         if: steps.stack.outputs.check_command != '' && steps.stack.outputs.test_command != ''
         env:
           CMD: ${{ steps.stack.outputs.check_command }}
-        run: bash -euo pipefail -c "$CMD"
+          RANGE: ${{ github.event.before != '0000000000000000000000000000000000000000' && github.event.before || 'HEAD~1' }}..${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # {files}: only the code files this change touched, so old problems elsewhere do not block it.
+          if [[ "$CMD" == *"{files}"* ]]; then
+            files=$(python3 .sdlc-plugin/.github/actions/setup-stack/stack.py --changed "$RANGE")
+            if [ -z "$files" ]; then echo "No changed code files: static checks skipped."; exit 0; fi
+            CMD=${CMD//\{files\}/$files}
+          fi
+          bash -euo pipefail -c "$CMD"
 
       - name: Run the project's tests (test_command)
         if: steps.stack.outputs.test_command != ''

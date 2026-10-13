@@ -43,6 +43,10 @@ on:
         description: "vars.JIRA_USER_EMAIL"
         type: string
         default: ""
+      fix_max_lines:
+        description: "Fix lane: warn when a fix/ PR changes more lines than this (it should be a story)"
+        type: number
+        default: 300
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
@@ -71,6 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       story: ${{ steps.cfg.outputs.story }}
+      gate: ${{ steps.cfg.outputs.gate }}
       advisory: ${{ steps.cfg.outputs.advisory }}
       fail_on: ${{ steps.cfg.outputs.fail_on }}
       model: ${{ steps.cfg.outputs.model }}
@@ -80,14 +85,27 @@ jobs:
         id: cfg
         env:
           DRAFT: ${{ github.event.pull_request.draft }}
+          ADDITIONS: ${{ github.event.pull_request.additions }}
+          DELETIONS: ${{ github.event.pull_request.deletions }}
+          FIX_MAX: ${{ inputs.fix_max_lines }}
         run: |
           set -euo pipefail
-          story=false
-          if [[ "$HEAD_REF" == story/* ]] && [ "$DRAFT" != "true" ]; then story=true; fi
+          # story/ PRs: review gate, traceability, tests. fix/ PRs (the fix lane, no plan):
+          # review gate and tests. Everything else: tests only.
+          story=false; gate=false
+          if [[ "$HEAD_REF" == story/* ]] && [ "$DRAFT" != "true" ]; then story=true; gate=true; fi
+          if [[ "$HEAD_REF" == fix/* ]] && [ "$DRAFT" != "true" ]; then
+            gate=true
+            CHANGED_LINES=$(( ${ADDITIONS:-0} + ${DELETIONS:-0} ))
+            if [ "$CHANGED_LINES" -gt "${FIX_MAX:-300}" ]; then
+              echo "::warning title=Large fix::This fix changes $CHANGED_LINES lines (fix lane limit $FIX_MAX). Bigger changes go through a story: intent, spec, plan."
+            fi
+          fi
           advisory=$(jq -c --arg repo "$GITHUB_REPOSITORY" --arg pr "$PR" \
             '[.advisory[]? | .prompt |= (gsub("\\{repo\\}"; $repo) | gsub("\\{pr\\}"; $pr))]' .sdlc/review.json)
           {
             echo "story=$story"
+            echo "gate=$gate"
             echo "fail_on=$(jq -r '.gate.fail_on // "high"' .sdlc/review.json)"
             echo "model=$(jq -r '.gate.model // "claude-sonnet-5"' .sdlc/review.json)"
             echo "advisory=$advisory"
@@ -96,13 +114,14 @@ jobs:
 
   review-gate:
     needs: config
-    if: needs.config.outputs.story == 'true'
+    if: needs.config.outputs.gate == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       SDLC_HEADLESS: "1"
       SDLC_WRITE_ALLOW: ".sdlc-output/pr-review.json"
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - name: Scope the App token to this repo and the plugin repo
         id: app-repos
@@ -138,15 +157,26 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: AI budget check (review)
+        id: budget-review
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: review
+          token: ${{ steps.app.outputs.token }}
+
       - name: Conformance review (sdlc:review-story, headless)
         continue-on-error: true   # a crashed review becomes "failed" and the gate below blocks
         env:
+          AI_BUDGET: ${{ steps.budget-review.outputs.flag }}
           MODEL: ${{ needs.config.outputs.model }}
         run: |
           set -euo pipefail
           mkdir -p .sdlc-output
           # Claude holds no GitHub or Jira token; it reads the repo and writes one JSON file.
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
           claude -p "/sdlc:review-story mode=headless base=origin/$BASE_BRANCH" \
+            "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
             --max-turns 40 \
@@ -155,6 +185,15 @@ jobs:
             --output-format stream-json --verbose \
             > "$RUNNER_TEMP/review-transcript.jsonl"
           tail -n1 "$RUNNER_TEMP/review-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)"' || true
+
+      - name: Record AI spend (review)
+        if: always() && steps.budget-review.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: review
+          transcript: ${{ runner.temp }}/review-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
 
       - name: Render and post the review
         id: gate
@@ -196,7 +235,7 @@ jobs:
 
   advisory:
     needs: config
-    if: needs.config.outputs.story == 'true' && needs.config.outputs.advisory != '[]'
+    if: needs.config.outputs.gate == 'true' && needs.config.outputs.advisory != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true   # advisory reviewers never block
@@ -225,9 +264,27 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: AI budget check (advisory)
+        id: budget-advisory
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: advisory
+          token: ${{ steps.app.outputs.token }}
+
       - uses: anthropics/claude-code-action@v1
+        id: advisory
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # sdlc-bot App token: comments post as the bot, and no OIDC exchange is needed.
           github_token: ${{ steps.app.outputs.token }}
           # Automatic Build opens story PRs as sdlc-bot; allow that bot, and only that one.
@@ -237,7 +294,17 @@ jobs:
           prompt: ${{ matrix.reviewer.prompt }}
           claude_args: >-
             --max-turns 40
+            ${{ steps.budget-advisory.outputs.flag }}
             ${{ matrix.reviewer.allowed_tools && format('--allowedTools "{0}"', matrix.reviewer.allowed_tools) || '' }}
+
+      - name: Record AI spend (advisory)
+        if: always() && steps.budget-advisory.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: advisory
+          transcript: ${{ steps.advisory.outputs.execution_file }}
+          token: ${{ steps.app.outputs.token }}
 
   traceability:
     needs: [config, review-gate]
@@ -286,7 +353,7 @@ jobs:
   e2e:
     needs: [config, review-gate]
     # Story PRs: only after the review gate passes. Other PRs (design, spec, config): always.
-    if: always() && (needs.review-gate.result == 'success' || (needs.config.outputs.story != 'true' && needs.config.result == 'success'))
+    if: always() && (needs.review-gate.result == 'success' || (needs.config.outputs.gate != 'true' && needs.config.result == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -306,6 +373,8 @@ jobs:
           repositories: ${{ steps.app-repos.outputs.names }}
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # history for check_command {files}
 
       - name: Check out the sdlc plugin (pinned)
         uses: actions/checkout@v4
@@ -321,8 +390,8 @@ jobs:
         with:
           # Story PRs need a stack; intent, spec, design and stack PRs can
           # come before the spec decided one or the first story scaffolded it.
-          require-tests: ${{ needs.config.outputs.story == 'true' && 'true' || 'false' }}
-          skip-without-code: ${{ needs.config.outputs.story == 'true' && 'false' || 'true' }}
+          require-tests: ${{ needs.config.outputs.gate == 'true' && 'true' || 'false' }}
+          skip-without-code: ${{ needs.config.outputs.gate == 'true' && 'false' || 'true' }}
 
       - name: Nothing to test yet
         if: steps.stack.outputs.test_command == ''
@@ -332,7 +401,16 @@ jobs:
         if: steps.stack.outputs.check_command != '' && steps.stack.outputs.test_command != ''
         env:
           CMD: ${{ steps.stack.outputs.check_command }}
-        run: bash -euo pipefail -c "$CMD"
+          RANGE: origin/${{ inputs.base_branch }}...HEAD
+        run: |
+          set -euo pipefail
+          # {files}: only the code files this change touched, so old problems elsewhere do not block it.
+          if [[ "$CMD" == *"{files}"* ]]; then
+            files=$(python3 .sdlc-plugin/.github/actions/setup-stack/stack.py --changed "$RANGE")
+            if [ -z "$files" ]; then echo "No changed code files: static checks skipped."; exit 0; fi
+            CMD=${CMD//\{files\}/$files}
+          fi
+          bash -euo pipefail -c "$CMD"
 
       - name: Run the project's tests (test_command)
         if: steps.stack.outputs.test_command != ''

@@ -27,7 +27,10 @@ on the marketplace repo (or someone who has it).
 3. **Install the sdlc-bot App** on the project repo too.
 4. **Variables and secrets** (project > Settings > Secrets and variables >
    Actions): see the table in [configuration.md](configuration.md#repo-variables-and-secrets).
-   A Claude subscription token comes from `claude setup-token`.
+   For the Claude credential, create a workspace for the project (or team)
+   in the Anthropic Console, set its monthly spend limit, and store its API
+   key as `ANTHROPIC_API_KEY`. Then set the per-run and monthly `budgets` in
+   `.sdlc/sdlc.json` ([AI spend limits](configuration.md#ai-spend-limits)).
 5. **Branch protection** on the base branch: require the checks from
    [stages.md](stages.md) once each has run once (GitHub only lists checks
    it has seen). Skipped checks count as passing, so non-story PRs are not

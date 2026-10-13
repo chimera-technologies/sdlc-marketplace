@@ -70,7 +70,7 @@ project by bumping one tag (`/sdlc:init upgrade=vX.Y.Z`).
 ```
 .claude-plugin/marketplace.json      the marketplace
 plugins/sdlc/
-  skills/        init, write-intent, write-spec, review-spec, design-ui, build-story, review-plan,
+  skills/        init, write-intent, write-spec, review-spec, design-ui, build-story, fix, review-plan,
                  review-story, release, triage, security-policy, infra-policy
                  (each: SKILL.md + templates/, scripts/, examples/, reference/)
   agents/        verifier (Build)
@@ -85,6 +85,7 @@ plugins/sdlc/
   release-tag.yml  tags each new version when it merges, with its GitHub release
   evals.yml      end-to-end evals of the skills (manual for now)
 .github/actions/setup-stack/        installs a project's declared toolchains
+.github/actions/ai-budget/          AI spend limits around every headless Claude step
 tests/           unit tests (stdlib unittest)
 evals/           end-to-end eval cases (see evals/README.md)
 platform/        managed-settings example for IT

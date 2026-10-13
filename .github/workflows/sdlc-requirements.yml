@@ -161,8 +161,19 @@ jobs:
         if: steps.docs.outputs.count != '0'
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: AI budget check (requirements)
+        id: budget-requirements
+        if: steps.docs.outputs.count != '0'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: requirements
+          token: ${{ steps.app.outputs.token }}
+
       - name: Turn each document into intents (write-intent, headless)
         if: steps.docs.outputs.count != '0'
+        env:
+          AI_BUDGET: ${{ steps.budget-requirements.outputs.flag }}
         run: |
           set -euo pipefail
           mkdir -p intent .sdlc-output "$RUNNER_TEMP/out"
@@ -171,7 +182,9 @@ jobs:
             name=$(basename "$doc"); stem=$(tr 'A-Z._' 'a-z--' <<<"${name%.*}")
             echo "::group::$doc"
             rm -f .sdlc-output/intents.json
+            read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
             claude -p "/sdlc:write-intent mode=headless source=document input=$doc" \
+              "${ai_budget[@]}" \
               --plugin-dir "$PLUGIN_DIR" \
               --model "$MODEL" \
               --max-turns 120 \
@@ -185,6 +198,15 @@ jobs:
             fi
             echo "::endgroup::"
           done < "$RUNNER_TEMP/docs.txt"
+
+      - name: Record AI spend (requirements)
+        if: always() && steps.budget-requirements.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: requirements
+          transcript: ${{ runner.temp }}/out/transcript-*.jsonl
+          token: ${{ steps.app.outputs.token }}
 
       - name: Collect the new intents
         id: collect

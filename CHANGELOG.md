@@ -4,6 +4,55 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.20.0 (2026-10-13)
+
+- **AI spend limits.** A new `ai-budget` action wraps every headless Claude
+  step (13 of them, and the advisory reviewers):
+  - a hard cap per run with `--max-budget-usd`, per stage, from the new
+    `budgets.per_run_usd` in `.sdlc/sdlc.json` (defaults about 5-10 times a
+    normal run, for example `build` 30, `review` 10);
+  - each run's cost added to a monthly `sdlc-spend` issue (total and by
+    stage); with `budgets.monthly_usd` set, AI steps stop once it is spent,
+    with a warning at 80%.
+  The hard ceiling stays the Anthropic Console workspace's spend limit.
+- **API key support everywhere.** The intake, spec, design and PR review
+  steps passed only `CLAUDE_CODE_OAUTH_TOKEN`; they now also pass
+  `ANTHROPIC_API_KEY`, so a Console API key, the recommended credential for
+  CI, works for every stage.
+- **The fix lane.** New skill `sdlc:fix`: small fixes on a `fix/<name>`
+  branch, a failing test first, no intent, spec or plan. The build guard
+  allows `fix/` branches; `sdlc-pr` runs the review gate and the tests on
+  them (not traceability) and warns past `fix_max_lines` (new input,
+  default 300). `review-story` reviews fix PRs against the rules, without a
+  plan.
+- **Checks on changed files only.** `check_command` may use `{files}`: CI
+  fills in the code files the PR or push changed (`stack.py --changed`), so
+  an existing codebase's old lint errors do not block new work. The test
+  jobs now fetch full history.
+- **Pre-screen after edits.** New reusable workflow `sdlc-prescreen.yml`:
+  when someone pushes to a spec or plan PR, `review-spec` or `review-plan`
+  runs again on the PR as it is now and posts one comment, updated in place.
+- **`/sdlc revise <request>`.** New reusable workflow `sdlc-revise.yml`
+  and caller `sdlc-comment.yml`: a reviewer's comment on an intent, spec or
+  plan PR (owners, members, collaborators only) has Claude make the change
+  on the PR's branch, validated before it is pushed, and reply with what
+  changed. On a spec PR it revises the mockups too when the stories or
+  screens change; `/sdlc revise design: ...` revises only the mockups. New
+  `mode=revise ... request=` in `write-intent`, `write-spec`, `design-ui`
+  and `build-story`.
+
+**Upgrading**
+
+1. `/sdlc:init upgrade=v0.20.0` and merge the PR. It adds `budgets` (with
+   the default caps) to `.sdlc/sdlc.json`, the `prescreen` job to
+   `sdlc-pull-request.yml`, and the new `sdlc-comment.yml` caller.
+2. Recommended: store an Anthropic Console API key (one workspace per
+   project or team, with its monthly spend limit) as `ANTHROPIC_API_KEY`
+   and remove `CLAUDE_CODE_OAUTH_TOKEN`. Set `budgets.monthly_usd` if you
+   want the soft monthly stop.
+3. Optional: change `check_command` to use `{files}` in an existing
+   codebase with lint debt.
+
 ## v0.19.0 (2026-10-06)
 
 - **Reusable coding patterns.** A generic catalogue,

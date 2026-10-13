@@ -29,7 +29,8 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
    `python "<validate_plan.py path from the caller>" --check-tests <plan>`.
    Every acceptance criterion must have a test named for `S<n> AC-<k>`.
 2. **Checks and tests pass**: run `check_command` from `.sdlc/build.yaml`
-   if it is set (linter and type checker), then `test_file_command` for this
+   if it is set (linter and type checker; a `{files}` in it is the code
+   files the story changed against main), then `test_file_command` for this
    story's test files, then `test_command` once for the full suite. Report
    only the failing checks or test names and their first error line.
 3. **Each criterion is really tested**: for every AC, read its test and
