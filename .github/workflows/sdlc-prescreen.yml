@@ -67,7 +67,7 @@ jobs:
       github.event.action == 'synchronize'
       && (startsWith(github.head_ref, 'spec/') || startsWith(github.head_ref, 'plan/'))
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45   # a review panel (several agents) can take over 10 minutes
     concurrency:
       group: prescreen-${{ github.event.pull_request.number }}
       cancel-in-progress: true   # only the newest push matters
@@ -140,6 +140,7 @@ jobs:
         if: steps.target.outputs.kind != ''
         continue-on-error: true   # a failed screen is reported as failed, never blocks
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-prescreen.outputs.flag }}
           SDLC_WRITE_ALLOW: ${{ steps.target.outputs.out }}
           CMD: ${{ steps.target.outputs.cmd }}

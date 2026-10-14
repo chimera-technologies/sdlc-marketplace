@@ -116,7 +116,7 @@ jobs:
     needs: config
     if: needs.config.outputs.gate == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45   # a review panel (several agents) can take over 10 minutes
     env:
       SDLC_HEADLESS: "1"
       SDLC_WRITE_ALLOW: ".sdlc-output/pr-review.json"
@@ -168,6 +168,7 @@ jobs:
       - name: Conformance review (sdlc:review-story, headless)
         continue-on-error: true   # a crashed review becomes "failed" and the gate below blocks
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-review.outputs.flag }}
           MODEL: ${{ needs.config.outputs.model }}
         run: |

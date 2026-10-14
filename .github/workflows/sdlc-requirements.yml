@@ -173,6 +173,7 @@ jobs:
       - name: Turn each document into intents (write-intent, headless)
         if: steps.docs.outputs.count != '0'
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-requirements.outputs.flag }}
         run: |
           set -euo pipefail

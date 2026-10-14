@@ -237,6 +237,7 @@ jobs:
 
       - name: Read the decision with init (headless)
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-stack.outputs.flag }}
           ACCEPTED_BY: ${{ steps.accepted.outputs.by }}
           ACCEPTED_PR: ${{ steps.accepted.outputs.pr }}

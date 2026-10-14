@@ -15,6 +15,17 @@ tag in `.sdlc/sdlc.json`; move to a newer one with
   requested in a separate step after the PR opens, retried three times,
   and a failure is a warning that shows GitHub's error. CODEOWNERS still
   requests the code owners either way.
+- **Review panels finish in CI.** A headless `claude -p` stopped background
+  work 10 minutes after its last turn, so a large review run as a review
+  panel (the pre-screen of a plan or spec, the PR review gate, big
+  requirement documents) could end with no review written ("did not run").
+  Every headless Claude step now sets `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
+  and waits for its agents; the job timeout is the limit (pre-screen and
+  review gate raised to 45 minutes).
+- **`/sdlc revise` replies reliably.** The reply after a pushed revision
+  failed silently; replies now go through the REST API, each stage is
+  logged, and a failed reply is a warning (the revision is already pushed)
+  instead of a red run.
 
 **Upgrading**
 

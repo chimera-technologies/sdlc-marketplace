@@ -113,6 +113,13 @@ class WorkflowWiringTest(unittest.TestCase):
         self.assertIn("${{ steps.budget-advisory.outputs.flag }}", advisory)
         self.assertIn("steps.advisory.outputs.execution_file", advisory)
 
+    def test_headless_claude_waits_for_its_workflow_agents(self):
+        """Without it, claude -p stops a review panel 10 minutes after its last turn and no review is written."""
+        for path in sorted(WORKFLOWS.glob("sdlc-*.yml")):
+            for step in steps_of(path.read_text(encoding="utf-8")):
+                if "claude -p" in step:
+                    self.assertIn('CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"', step, path.name)
+
     def test_api_key_goes_wherever_the_subscription_token_goes(self):
         for path in sorted(WORKFLOWS.glob("sdlc-*.yml")):
             text = path.read_text(encoding="utf-8")

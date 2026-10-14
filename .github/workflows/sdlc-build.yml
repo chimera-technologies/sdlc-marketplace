@@ -229,6 +229,7 @@ jobs:
 
       - name: Plan the story with build-story (headless)
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-plan.outputs.flag }}
           JIRA_KEY: ${{ steps.jira.outputs.key }}
         run: |
@@ -267,6 +268,7 @@ jobs:
       - name: Review the plan for edge cases and bugs (review-plan, headless)
         continue-on-error: true   # a failed review shows as "did not run" in the PR, never blocks it
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-review-plan.outputs.flag }}
           SDLC_WRITE_ALLOW: ".sdlc-output/plan-review.json"
         run: |
@@ -317,6 +319,7 @@ jobs:
         if: steps.findings.outputs.count != '0'
         continue-on-error: true   # validation below reports anything left unhandled
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-plan-revise.outputs.flag }}
         run: |
           set -euo pipefail
@@ -584,6 +587,7 @@ jobs:
       - name: Build the story with build-story (headless)
         continue-on-error: true   # an incomplete build still opens a draft PR
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-build.outputs.flag }}
         run: |
           set -euo pipefail

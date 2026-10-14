@@ -204,6 +204,7 @@ jobs:
         id: claude
         if: steps.dedup.outputs.existing == ''
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-intake.outputs.flag }}
           # A Console API key (ANTHROPIC_API_KEY) is recommended for CI; a
           # subscription token from `claude setup-token` also works. Set one.
