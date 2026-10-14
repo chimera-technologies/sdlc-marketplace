@@ -4,6 +4,23 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.20.1 (2026-10-14)
+
+- **A failed reviewer request no longer fails the run.** The PR-opening
+  steps (plan, story, intent, spec, stack and requirements PRs) asked for
+  reviewers inside `peter-evans/create-pull-request`; when that request
+  failed, the step failed after the PR was already open, and the steps
+  after it (such as moving the Jira story to In Review) were skipped. Seen
+  on a story PR: the PR was fine, the run was red. Reviewers are now
+  requested in a separate step after the PR opens, retried three times,
+  and a failure is a warning that shows GitHub's error. CODEOWNERS still
+  requests the code owners either way.
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.20.1` and merge the PR (the callers' pinned tag
+changes; nothing else to do).
+
 ## v0.20.0 (2026-10-13)
 
 - **AI spend limits.** A new `ai-budget` action wraps every headless Claude

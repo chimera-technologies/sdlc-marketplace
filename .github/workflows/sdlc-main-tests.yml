@@ -249,6 +249,7 @@ jobs:
           { echo "folder=$folder"; echo "title=$story $title"; } >> "$GITHUB_OUTPUT"
 
       - name: Open the test-report PR
+        id: open-pr
         if: steps.find.outputs.story == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
