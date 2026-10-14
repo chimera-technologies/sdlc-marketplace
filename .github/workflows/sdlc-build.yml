@@ -425,7 +425,32 @@ jobs:
           labels: |
             plan
             plan-review:${{ steps.check.outputs.review }}
-          reviewers: ${{ steps.check.outputs.reviewer }}
+
+      - name: Request reviewers (never blocks)
+        # Separate from opening the PR: a failed request must not fail the run (the PR is already open).
+        if: always() && steps.pr.outputs.pull-request-number != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+          REVIEWERS: ${{ steps.check.outputs.reviewer }}
+          TEAM_REVIEWERS: ''
+        run: |
+          set -uo pipefail
+          args=()
+          IFS=',' read -ra users <<<"${REVIEWERS:-}"
+          for u in "${users[@]}"; do u=${u// /}; [ -n "$u" ] && args+=(-f "reviewers[]=$u"); done
+          IFS=',' read -ra teams <<<"${TEAM_REVIEWERS:-}"
+          for t in "${teams[@]}"; do t=${t// /}; [ -n "$t" ] && args+=(-f "team_reviewers[]=$t"); done
+          [ "${#args[@]}" -gt 0 ] || { echo "No reviewers to request."; exit 0; }
+          out=""
+          for wait in 0 5 20; do
+            sleep "$wait"
+            if out=$(gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/requested_reviewers" "${args[@]}" 2>&1); then
+              echo "Requested review on #$PR_NUMBER from ${REVIEWERS:-} ${TEAM_REVIEWERS:-}"; exit 0
+            fi
+          done
+          echo "::warning title=Review request failed::Could not request review on #$PR_NUMBER from ${REVIEWERS:-} ${TEAM_REVIEWERS:-}: ${out:0:300}. The PR is open; CODEOWNERS still asks the code owners."
 
       - name: Tell the Jira story (plan ready)
         if: steps.jira.outputs.key != 'none' && steps.pr.outputs.pull-request-url != ''
@@ -676,7 +701,32 @@ jobs:
           body-path: ${{ runner.temp }}/pr-body.md
           draft: ${{ steps.check.outputs.result != 'PASS' }}
           labels: story
-          reviewers: ${{ steps.check.outputs.reviewer }}
+
+      - name: Request reviewers (never blocks)
+        # Separate from opening the PR: a failed request must not fail the run (the PR is already open).
+        if: always() && steps.pr.outputs.pull-request-number != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+          REVIEWERS: ${{ steps.check.outputs.reviewer }}
+          TEAM_REVIEWERS: ''
+        run: |
+          set -uo pipefail
+          args=()
+          IFS=',' read -ra users <<<"${REVIEWERS:-}"
+          for u in "${users[@]}"; do u=${u// /}; [ -n "$u" ] && args+=(-f "reviewers[]=$u"); done
+          IFS=',' read -ra teams <<<"${TEAM_REVIEWERS:-}"
+          for t in "${teams[@]}"; do t=${t// /}; [ -n "$t" ] && args+=(-f "team_reviewers[]=$t"); done
+          [ "${#args[@]}" -gt 0 ] || { echo "No reviewers to request."; exit 0; }
+          out=""
+          for wait in 0 5 20; do
+            sleep "$wait"
+            if out=$(gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/requested_reviewers" "${args[@]}" 2>&1); then
+              echo "Requested review on #$PR_NUMBER from ${REVIEWERS:-} ${TEAM_REVIEWERS:-}"; exit 0
+            fi
+          done
+          echo "::warning title=Review request failed::Could not request review on #$PR_NUMBER from ${REVIEWERS:-} ${TEAM_REVIEWERS:-}: ${out:0:300}. The PR is open; CODEOWNERS still asks the code owners."
 
       - name: Tell the Jira story (story PR open)
         if: steps.jira.outputs.key != 'none' && steps.jira.outputs.key != '' && steps.pr.outputs.pull-request-url != ''

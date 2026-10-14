@@ -30,7 +30,7 @@ def wf(name):
 
 def steps_of(text):
     """The steps of a workflow file as text blocks (split on '- name:' / '- uses:' at any indent)."""
-    return re.split(r"\n(?=\s+- (?:name|uses): )", text)
+    return [part for part in re.split(r"\n(?=\s+- (?:name|uses): )", text) if part.strip()]
 
 
 class BudgetTest(unittest.TestCase):
@@ -119,6 +119,26 @@ class WorkflowWiringTest(unittest.TestCase):
             oauth = len(re.findall(r"CLAUDE_CODE_OAUTH_TOKEN: \$\{\{ secrets|claude_code_oauth_token:", text))
             key = len(re.findall(r"ANTHROPIC_API_KEY: \$\{\{ secrets|anthropic_api_key:", text))
             self.assertEqual(oauth, key, f"{path.name}: {oauth} token uses but {key} API key uses")
+
+
+class ReviewRequestTest(unittest.TestCase):
+    """A failed reviewer request must never fail the run: the PR is already open (skills-dashboard #26)."""
+
+    def test_reviewers_are_requested_in_a_separate_step_that_never_blocks(self):
+        found = 0
+        for path in sorted(WORKFLOWS.glob("sdlc-*.yml")):
+            steps = steps_of(path.read_text(encoding="utf-8"))
+            for k, step in enumerate(steps):
+                if "peter-evans/create-pull-request" not in step:
+                    continue
+                self.assertNotRegex(step, r"\n\s+(team-)?reviewers:", f"{path.name}: reviewers inside create-pull-request")
+                nxt = steps[k + 1] if k + 1 < len(steps) else ""
+                if "Request reviewers (never blocks)" in nxt:
+                    found += 1
+                    self.assertIn("continue-on-error: true", nxt, path.name)
+                    self.assertIn("pull-request-number != ''", nxt, path.name)
+                    self.assertIn("::warning title=Review request failed::", nxt, path.name)
+        self.assertEqual(found, 6)
 
 
 class FixLaneTest(unittest.TestCase):
