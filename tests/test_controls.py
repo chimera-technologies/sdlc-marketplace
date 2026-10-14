@@ -30,7 +30,7 @@ def wf(name):
 
 def steps_of(text):
     """The steps of a workflow file as text blocks (split on '- name:' / '- uses:' at any indent)."""
-    return re.split(r"\n(?=\s+- (?:name|uses): )", text)
+    return [part for part in re.split(r"\n(?=\s+- (?:name|uses): )", text) if part.strip()]
 
 
 class BudgetTest(unittest.TestCase):
