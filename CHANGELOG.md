@@ -4,17 +4,10 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
-## v0.20.1 (2026-10-14)
+## v0.20.2 (2026-10-16)
 
-- **A failed reviewer request no longer fails the run.** The PR-opening
-  steps (plan, story, intent, spec, stack and requirements PRs) asked for
-  reviewers inside `peter-evans/create-pull-request`; when that request
-  failed, the step failed after the PR was already open, and the steps
-  after it (such as moving the Jira story to In Review) were skipped. Seen
-  on a story PR: the PR was fine, the run was red. Reviewers are now
-  requested in a separate step after the PR opens, retried three times,
-  and a failure is a warning that shows GitHub's error. CODEOWNERS still
-  requests the code owners either way.
+These two fixes were meant for v0.20.1 but were pushed after it merged.
+
 - **Review panels finish in CI.** A headless `claude -p` stopped background
   work 10 minutes after its last turn, so a large review run as a review
   panel (the pre-screen of a plan or spec, the PR review gate, big
@@ -26,6 +19,23 @@ tag in `.sdlc/sdlc.json`; move to a newer one with
   failed silently; replies now go through the REST API, each stage is
   logged, and a failed reply is a warning (the revision is already pushed)
   instead of a red run.
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.20.2` and merge the PR (the callers' pinned tag
+changes; nothing else to do).
+
+## v0.20.1 (2026-10-14)
+
+- **A failed reviewer request no longer fails the run.** The PR-opening
+  steps (plan, story, intent, spec, stack and requirements PRs) asked for
+  reviewers inside `peter-evans/create-pull-request`; when that request
+  failed, the step failed after the PR was already open, and the steps
+  after it (such as moving the Jira story to In Review) were skipped. Seen
+  on a story PR: the PR was fine, the run was red. Reviewers are now
+  requested in a separate step after the PR opens, retried three times,
+  and a failure is a warning that shows GitHub's error. CODEOWNERS still
+  requests the code owners either way.
 
 **Upgrading**
 
