@@ -4,6 +4,36 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.22.0 (2026-10-16)
+
+- **Test cases and results in Jira with Xray.** New script
+  `skills/build-story/scripts/xray_sync.py`, used when the repo has the
+  secrets `XRAY_CLIENT_ID` and `XRAY_CLIENT_SECRET`:
+  - when a plan is approved (the build job): one Xray Test per planned test
+    case (AC, EC, BUG), linked to the story, a Test Plan for the story, and
+    a "planned" Test Execution at TODO;
+  - after the story PR's tests (`sdlc-pr`) and after the tests on the base
+    branch (`sdlc-main-tests`, via a results artifact): a Test Execution
+    with each test PASSED or FAILED, the failure text, and every browser
+    test's screenshot as evidence, linked to the story and its Test Plan.
+  Never blocks a run; skips without the secrets.
+- **Per-test results.** New `.sdlc/build.yaml` keys `results_path` (the
+  JUnit XML the tests write) and `evidence_path` (the screenshots folder);
+  the setup-stack action outputs them, and `build-story` sets them up in the
+  scaffold story.
+- New optional secrets `XRAY_CLIENT_ID`, `XRAY_CLIENT_SECRET` on
+  `sdlc-build`, `sdlc-pr` and `sdlc-main-tests`; `init` passes them.
+
+**Upgrading**
+
+1. `/sdlc:init upgrade=v0.22.0` and merge the PR (the callers now pass the
+   Xray secrets).
+2. For Xray: install it, map its work types in the space, create an API key,
+   and add the repo secrets `XRAY_CLIENT_ID` and `XRAY_CLIENT_SECRET`.
+3. Make the tests write JUnit XML and screenshots, and set `results_path`
+   and `evidence_path` in `.sdlc/build.yaml`. Without them, Xray still gets
+   the planned tests, but no results.
+
 ## v0.21.0 (2026-10-16)
 
 - **Failing tests on a story PR go back to Build automatically.** New job

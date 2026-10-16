@@ -130,7 +130,7 @@ def normalize(answers):
     st.setdefault("code_paths", ["src/", "tests/"])
     st.setdefault("test_paths", ["tests/"])
     for k in ("install_command", "test_command", "test_file_command", "report_path", "setup_command",
-              "check_command", "lint_command", "format_command", "ui_library"):
+              "check_command", "lint_command", "format_command", "ui_library", "results_path", "evidence_path"):
         st.setdefault(k, "")
         if "#" in st[k]:
             errors.append(f"stack.{k} must not contain '#' (build.yaml treats it as a comment)")
@@ -221,6 +221,8 @@ def render_build(a):
         f"lint_command: {s['lint_command']}     # {{file}}: run after every code write; errors go back to Claude",
         f"format_command: {s['format_command']}     # {{file}}: run after every code write; fixes formatting",
         f"ui_library: {s['ui_library']}     # the UI component library the spec chose; empty = no UI",
+        f"results_path: {s['results_path']}     # glob of the JUnit XML the tests write: per-test results, Xray",
+        f"evidence_path: {s['evidence_path']}     # folder of the screenshots the browser tests save",
         "",
         "# Token-saving tools the Build preflight installs and wires up (pinned).",
         f"graphify_version: {GRAPHIFY_VERSION}",
@@ -457,6 +459,10 @@ def header(a, title, what):
             "# init_project.py --upgrade <tag>.\n\n")
 
 
+# Xray test management (xray_sync.py): optional; the steps skip when these are empty.
+XRAY_SECRETS = ("XRAY_CLIENT_ID", "XRAY_CLIENT_SECRET")
+
+
 def render_callers(a):
     s, m, files = a["stages"], a["models"], {}
     jobs = []
@@ -469,7 +475,8 @@ def render_callers(a):
     if s["pr_review"] or s["test"]:
         jobs.append("  pr:\n" + call(a, "sdlc-pr.yml", if_expr="github.event.action != 'closed'",
                                       extra_with=(f"      autofix_attempts: {a['autofix_attempts'] if s['build'] else 0}\n"
-                                                  f"      fix_model: {m['build']}\n")))
+                                                  f"      fix_model: {m['build']}\n"),
+                                      extra_secrets=XRAY_SECRETS))
     if s["build"]:
         jobs.append("  story-link:\n" + call(a, "sdlc-story-link.yml", if_expr="github.event.action == 'closed'"))
     if s["design"] or s["build"]:
@@ -510,13 +517,13 @@ def render_callers(a):
     auto_build = s["build"] and a["auto_build"]
     if auto_build:
         jobs.append("  build:\n" + call(
-            a, "sdlc-build.yml",
+            a, "sdlc-build.yml", extra_secrets=XRAY_SECRETS,
             extra_with=f"      model: {m['build']}\n      spec_file: ${{{{ inputs.rerun == 'build' && inputs.file || '' }}}}\n",
             if_expr="github.event_name == 'push' || inputs.rerun == 'build'"))
     if s["test"]:
         # The test report of a merged story reads its PRs, checks and test logs.
         jobs.append("  tests:\n" + call(
-            a, "sdlc-main-tests.yml", if_expr="github.event_name == 'push'",
+            a, "sdlc-main-tests.yml", if_expr="github.event_name == 'push'", extra_secrets=XRAY_SECRETS,
             permissions=("    permissions:\n      contents: read\n      actions: read\n      checks: read\n"
                          "      issues: read\n      pull-requests: read\n")))
     if s["deploy"]:
@@ -807,6 +814,8 @@ def set_stack(root, stack):
         "lint_command": stack.get("lint_command", ""),
         "format_command": stack.get("format_command", ""),
         "ui_library": stack.get("ui_library", ""),
+        "results_path": stack.get("results_path", ""),
+        "evidence_path": stack.get("evidence_path", ""),
     }
     if stack.get("test_paths"):
         values["test_paths"] = yaml_list(stack["test_paths"])
@@ -825,7 +834,7 @@ CLOUDS, IACS = ("none", "aws", "azure", "gcp"), ("none", "terraform")
 TOOLCHAINS = ["node", "python", "java", "dotnet", "go", "terraform", "helm", "kubectl"]
 TOOLCHAIN_RE = re.compile(r"^([a-z]+)@v?\d[\w.\-]*$")
 STACK_TEXT_KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path",
-                   "check_command", "lint_command", "format_command", "ui_library"]
+                   "check_command", "lint_command", "format_command", "ui_library", "results_path", "evidence_path"]
 
 
 def validate_stack(stack):
