@@ -4,6 +4,32 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.23.0 (2026-10-16)
+
+- **Review findings are PR comments the reviewer answers.** The review gate
+  posts each high and medium finding as its own numbered comment (low ones
+  stay in the summary) and minimizes the previous review's as outdated. The
+  reviewer answers with `/sdlc fix <n> [how]`, `/sdlc fix all`, or
+  `/sdlc dismiss <n> <reason>`.
+- **`/sdlc fix`** (new `sdlc-fix-findings.yml`, routed by `sdlc-comment.yml`):
+  back to Build on the same story or fix branch (`build-story
+  mode=fix-findings`), the reviewer's way when they say how (the story's
+  design may change when asked; its PNGs are rendered again), checked and
+  verified, and pushed to the same PR, where the gate and the tests run
+  again. New AI budget stage `review-fix` (default 20).
+- **`/sdlc dismiss`**: the next review gets the dismissed findings with the
+  reasons and does not report them again (`review-story dismissed=`);
+  dismissing a high finding re-runs the gate at once.
+- **Fix: a failed review gate left the previous review's comment.** The
+  gate step ran with `bash -e`, so a failing render stopped it before the
+  comment, label and error were updated, and the PR still showed the last
+  "clean" review. The exit code is now caught.
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.23.0` and merge the PR: `sdlc-comment.yml` gains the
+`findings` job. Nothing else to do.
+
 ## v0.22.0 (2026-10-16)
 
 - **Test cases and results in Jira with Xray.** New script
