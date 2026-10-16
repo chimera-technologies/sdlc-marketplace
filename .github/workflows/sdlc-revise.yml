@@ -124,7 +124,8 @@ jobs:
           [ "$cross" = "false" ] || reason="the PR comes from a fork"
           [ -n "$kind" ] || reason="/sdlc revise works on intent, spec and plan PRs (this branch is $head)"
           if [ -n "$reason" ]; then
-            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Not revising: $reason."
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="Not revising: $reason." >/dev/null \
+              || echo "::warning::could not reply on #$PR"
             echo "kind=" >> "$GITHUB_OUTPUT"; exit 0
           fi
           # The request: everything after "/sdlc revise". "design:" asks for the mockups only.
@@ -135,7 +136,8 @@ jobs:
           fi
           [ "$kind" = spec ] || design_only=false
           if [ -z "${request//[[:space:]]/}" ]; then
-            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "Say what to change: \`/sdlc revise <request>\`."
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="Say what to change: \`/sdlc revise <request>\`." >/dev/null \
+              || echo "::warning::could not reply on #$PR"
             echo "kind=" >> "$GITHUB_OUTPUT"; exit 0
           fi
           printf '%s\n' "$request" > "$RUNNER_TEMP/request.md"
@@ -184,6 +186,7 @@ jobs:
         id: artifact
         if: steps.pr.outputs.kind != '' && steps.pr.outputs.design_only != 'true'
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-revise.outputs.flag }}
           KIND: ${{ steps.pr.outputs.kind }}
           FILE: ${{ steps.pr.outputs.file }}
@@ -212,6 +215,7 @@ jobs:
         id: design
         if: steps.pr.outputs.kind == 'spec'
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-revise.outputs.flag }}
           FILE: ${{ steps.pr.outputs.file }}
           SLUG: ${{ steps.pr.outputs.slug }}
@@ -259,14 +263,28 @@ jobs:
           SLUG: ${{ steps.pr.outputs.slug }}
           HEAD: ${{ steps.pr.outputs.head }}
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
         run: |
           set -uo pipefail
-          paths=("$FILE"); [ "$KIND" = spec ] && [ -d "designs/$SLUG" ] && paths+=("designs/$SLUG")
+          # Replies go through the REST API (as the review gate and pre-screen do), and a reply
+          # that fails is a warning with GitHub's error: the revision itself is already pushed.
+          reply() {
+            local out
+            if out=$(gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$1" 2>&1); then
+              echo "Replied on #$PR."
+            else
+              echo "::warning title=Reply failed::Could not reply on #$PR: ${out:0:300}"
+            fi
+          }
+          paths=("$FILE")
+          if [ "$KIND" = spec ] && [ -d "designs/$SLUG" ]; then paths+=("designs/$SLUG"); fi
           git add -A -- "${paths[@]}"
           if git diff --cached --quiet; then
-            reason="nothing changed"
-            [ -s "$RUNNER_TEMP/summary-artifact.md" ] && reason=$(cat "$RUNNER_TEMP/summary-artifact.md")
-            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "No change made. $reason"
+            echo "No change to $FILE."
+            { printf 'No change made. '
+              if [ -s "$RUNNER_TEMP/summary-artifact.md" ]; then cat "$RUNNER_TEMP/summary-artifact.md"; else echo "Nothing changed."; fi
+            } > "$RUNNER_TEMP/reply.md"
+            reply "$RUNNER_TEMP/reply.md"
             exit 0
           fi
           case "$KIND" in
@@ -274,26 +292,40 @@ jobs:
             spec)   check=(python3 "$VALIDATE_SPEC" --owners .sdlc/owners.yaml "$FILE") ;;
             plan)   check=(python3 "$VALIDATE_PLAN" --root . "$FILE") ;;
           esac
-          errors=$("${check[@]}" 2>&1) || {
+          echo "Validating $FILE..."
+          if ! errors=$("${check[@]}" 2>&1); then
+            echo "::error::$FILE does not pass validation; nothing pushed."
             printf 'The revision does not pass validation, so nothing was pushed:\n\n~~~\n%s\n~~~\n' "$errors" > "$RUNNER_TEMP/reply.md"
-            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/reply.md"; exit 1; }
+            reply "$RUNNER_TEMP/reply.md"
+            exit 1
+          fi
           if [ "$KIND" = spec ] && [ -f "designs/$SLUG/design.md" ]; then
-            errors=$(python3 "$VALIDATE_DESIGN" --owners .sdlc/owners.yaml "designs/$SLUG/design.md" 2>&1) || {
+            if ! errors=$(python3 "$VALIDATE_DESIGN" --owners .sdlc/owners.yaml "designs/$SLUG/design.md" 2>&1); then
+              echo "::error::the revised mockups do not pass validation; nothing pushed."
               printf 'The revised mockups do not pass validation, so nothing was pushed:\n\n~~~\n%s\n~~~\n' "$errors" > "$RUNNER_TEMP/reply.md"
-              gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/reply.md"; exit 1; }
+              reply "$RUNNER_TEMP/reply.md"
+              exit 1
+            fi
           fi
           uid=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
           git -c user.name="${APP_SLUG}[bot]" -c user.email="${uid}+${APP_SLUG}[bot]@users.noreply.github.com" \
             commit -q -m "revise: $(head -n1 "$RUNNER_TEMP/request.md" | cut -c1-60)" \
-                      -m "Requested in a PR comment: ${{ github.event.comment.html_url }}"
-          git push -q origin "HEAD:$HEAD"
+                      -m "Requested in a PR comment: $COMMENT_URL"
+          if ! git push -q origin "HEAD:$HEAD"; then
+            echo "::error::could not push the revision to $HEAD (the branch may have moved; ask again)."
+            exit 1
+          fi
+          sha=$(git rev-parse --short HEAD)
+          echo "Pushed $sha to $HEAD."
           {
-            echo "Revised as asked in [this comment](${{ github.event.comment.html_url }}): \`$(git rev-parse --short HEAD)\`."
+            echo "Revised as asked in [this comment]($COMMENT_URL): \`$sha\`."
             echo
-            cat "$RUNNER_TEMP/summary-artifact.md" "$RUNNER_TEMP/summary-design.md" 2>/dev/null | grep -vx 'design: update'
+            for f in "$RUNNER_TEMP/summary-artifact.md" "$RUNNER_TEMP/summary-design.md"; do
+              if [ -f "$f" ]; then grep -vx 'design: update' "$f"; fi
+            done
             echo
             echo '~~~'; git show --stat --format= HEAD; echo '~~~'
             echo
             echo "The checks and the pre-screen run again on this push. Review the change before you merge."
           } > "$RUNNER_TEMP/reply.md"
-          gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/reply.md"
+          reply "$RUNNER_TEMP/reply.md"

@@ -194,6 +194,7 @@ jobs:
 
       - name: Draft spec with write-spec skill (headless)
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-spec.outputs.flag }}
           SDLC_WRITE_ALLOW: "specs/"
           SLUG: ${{ steps.meta.outputs.slug }}
@@ -265,6 +266,7 @@ jobs:
       - name: Adversarial pre-screen with review-spec skill (headless)
         continue-on-error: true   # a failed review becomes "review:failed", not a failed run
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-review-spec.outputs.flag }}
           SDLC_WRITE_ALLOW: ".sdlc-output/spec-review.json"
           SLUG: ${{ steps.meta.outputs.slug }}
@@ -307,6 +309,7 @@ jobs:
         if: inputs.ui_design && steps.check.outputs.valid == 'true'
         continue-on-error: true   # a failed design is left out of the PR, not a failed run
         env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
           AI_BUDGET: ${{ steps.budget-design.outputs.flag }}
           SDLC_WRITE_ALLOW: "designs/"
           SLUG: ${{ steps.meta.outputs.slug }}

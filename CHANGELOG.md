@@ -4,6 +4,27 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.20.2 (2026-10-16)
+
+These two fixes were meant for v0.20.1 but were pushed after it merged.
+
+- **Review panels finish in CI.** A headless `claude -p` stopped background
+  work 10 minutes after its last turn, so a large review run as a review
+  panel (the pre-screen of a plan or spec, the PR review gate, big
+  requirement documents) could end with no review written ("did not run").
+  Every headless Claude step now sets `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
+  and waits for its agents; the job timeout is the limit (pre-screen and
+  review gate raised to 45 minutes).
+- **`/sdlc revise` replies reliably.** The reply after a pushed revision
+  failed silently; replies now go through the REST API, each stage is
+  logged, and a failed reply is a warning (the revision is already pushed)
+  instead of a red run.
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.20.2` and merge the PR (the callers' pinned tag
+changes; nothing else to do).
+
 ## v0.20.1 (2026-10-14)
 
 - **A failed reviewer request no longer fails the run.** The PR-opening
