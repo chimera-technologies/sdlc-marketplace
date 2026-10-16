@@ -13,7 +13,10 @@ name: "SDLC PR review and Test"
 #                     Anthropic's code-review plugin); comments only, never blocks.
 #   2. Test (only after the review gate passes, or for non-story PRs)
 #      traceability -> the story's plan maps every acceptance criterion to a test
-#      e2e          -> the Playwright suite
+#      e2e          -> the project's static checks, then its full test suite
+#   3. Story PRs whose tests fail: autofix goes back to Build (build-story
+#      mode=fix-tests) on the same branch and pushes the fix to this PR, which
+#      runs 1 and 2 again; at most autofix_attempts (2) times, then a person.
 # Required checks on main: review-gate, traceability, e2e.
 
 on:
@@ -47,6 +50,14 @@ on:
         description: "Fix lane: warn when a fix/ PR changes more lines than this (it should be a story)"
         type: number
         default: 300
+      autofix_attempts:
+        description: "Story PRs: automatic fixes of failing tests per PR before a person takes over (0 = off)"
+        type: number
+        default: 2
+      fix_model:
+        description: "Claude model for the automatic fix"
+        type: string
+        default: claude-opus-5-5
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
@@ -427,3 +438,245 @@ jobs:
           path: ${{ steps.stack.outputs.report_path }}
           if-no-files-found: ignore
           retention-days: 30
+
+  autofix:
+    needs: [config, traceability, e2e]
+    # Story PRs whose tests (or traceability) failed go back to Build on the same branch:
+    # build-story mode=fix-tests fixes the code and pushes to this PR, which re-runs the
+    # review gate and the tests. At most autofix_attempts times per PR, then a person.
+    if: >-
+      always() && needs.config.outputs.story == 'true' && inputs.autofix_attempts > 0
+      && (needs.e2e.result == 'failure' || needs.traceability.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: autofix-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    env:
+      SDLC_HEADLESS: "1"
+      # Code may go anywhere the stack needs it; the SDLC's own files may not change.
+      SDLC_WRITE_ALLOW: "*"
+      SDLC_WRITE_DENY: ".github/,.sdlc/,.claude/,intent/,specs/,designs/,plans/,releases/,runbooks/,CLAUDE.md,REVIEW.md,.sdlc-plugin/"
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SCRIPTS: .sdlc-plugin/plugins/sdlc/skills/build-story/scripts
+      MODEL: ${{ inputs.fix_model }}
+      MAX_ATTEMPTS: ${{ inputs.autofix_attempts }}
+    steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ steps.app.outputs.token }}
+          fetch-depth: 0
+
+      - name: Attempts so far, and the story's plan
+        id: go
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          attempts=$(git log "origin/$BASE_BRANCH..HEAD" --format=%s | grep -c '^autofix:' || true)
+          plan=$(grep -lx "branch: $HEAD_REF" plans/*.md 2>/dev/null | head -n1 || true)
+          go=true
+          if [ -z "$plan" ]; then
+            echo "::notice::No plan in plans/ for $HEAD_REF: nothing to fix against."; go=false
+          elif [ "$attempts" -ge "$MAX_ATTEMPTS" ]; then
+            go=false
+            marker="<!-- sdlc-autofix-stopped -->"
+            if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq '.[].body' | grep -qF "$marker"; then
+              printf '%s\n%s\n' "$marker" "The tests still fail after $attempts automatic fix attempts, so the bot has stopped. A person needs to look: open the failed check, fix the code on this branch (\`/sdlc:build-story\` on \`$HEAD_REF\`, or by hand), and push." > "$RUNNER_TEMP/stop.md"
+              gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$RUNNER_TEMP/stop.md" >/dev/null || true
+            fi
+            echo "::warning::Auto-fix stopped after $attempts attempts (autofix_attempts $MAX_ATTEMPTS)."
+          fi
+          { echo "go=$go"; echo "plan=$plan"; echo "attempt=$((attempts + 1))"; } >> "$GITHUB_OUTPUT"
+
+      - name: Check out the sdlc plugin (pinned)
+        if: steps.go.outputs.go == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+          persist-credentials: false
+
+      - name: Read the Ponytail pin
+        id: pins
+        if: steps.go.outputs.go == 'true'
+        run: |
+          ref=$(sed -n 's/^ponytail_ref:[[:space:]]*\([^[:space:]#]*\).*/\1/p' .sdlc/build.yaml | head -n1)
+          echo "ponytail_ref=${ref:-v4.10.0}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Ponytail (pinned)
+        if: steps.go.outputs.go == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: DietrichGebert/ponytail
+          ref: ${{ steps.pins.outputs.ponytail_ref }}
+          path: .sdlc-ponytail
+          persist-credentials: false
+
+      - name: Move Ponytail out of the project
+        if: steps.go.outputs.go == 'true'
+        run: mv .sdlc-ponytail "$RUNNER_TEMP/ponytail"
+
+      - uses: actions/setup-node@v4
+        if: steps.go.outputs.go == 'true'
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        if: steps.go.outputs.go == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Set up the project's stack (.sdlc/build.yaml)
+        id: stack
+        if: steps.go.outputs.go == 'true'
+        uses: ./.sdlc-plugin/.github/actions/setup-stack
+        with:
+          require-tests: "true"
+
+      - name: Reproduce the failure
+        id: repro
+        if: steps.go.outputs.go == 'true'
+        env:
+          PLAN: ${{ steps.go.outputs.plan }}
+          CHECK: ${{ steps.stack.outputs.check_command }}
+          TESTS: ${{ steps.stack.outputs.test_command }}
+        run: |
+          set -uo pipefail
+          # Run the failing checks here and keep their output: the fix starts from what really fails.
+          mkdir -p .sdlc-input
+          log=.sdlc-input/failure.log; failed=false
+          {
+            echo "== traceability: validate_plan.py --check-tests $PLAN"
+            python3 "$SCRIPTS/validate_plan.py" --check-tests "$PLAN" 2>&1 || failed=true
+            if [ -n "$CHECK" ] && [[ "$CHECK" != *"{files}"* ]]; then
+              echo "== check_command: $CHECK"
+              bash -o pipefail -c "$CHECK" 2>&1 || failed=true
+            fi
+            echo "== test_command: $TESTS"
+            bash -o pipefail -c "$TESTS" 2>&1 || failed=true
+          } > "$RUNNER_TEMP/full.log"
+          # Keep it short for the model: the end of each run holds the failures and the summary.
+          tail -n 400 "$RUNNER_TEMP/full.log" | sed 's/\x1b\[[0-9;]*m//g' > "$log"
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          echo "Reproduced: $failed"
+
+      - name: Say the failure did not happen again
+        if: steps.go.outputs.go == 'true' && steps.repro.outputs.failed != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          body="The failed checks pass when run again here, so this looks like a flaky test, not a code problem: nothing was changed. Re-run the failed jobs. If a test fails now and then, fix the test through the fix lane (\`/sdlc:fix\`)."
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" >/dev/null || echo "::warning::could not comment on #$PR"
+
+      - name: Preflight (Graphify, Ponytail)
+        if: steps.repro.outputs.failed == 'true'
+        run: |
+          # Exit 3 only means Ponytail is not active yet; it loads with the Claude session below.
+          python3 "$SCRIPTS/build_preflight.py" || [ $? -eq 3 ]
+
+      - name: AI budget check (autofix)
+        id: budget-autofix
+        if: steps.repro.outputs.failed == 'true'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: autofix
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Fix the failing tests with build-story (headless)
+        if: steps.repro.outputs.failed == 'true'
+        continue-on-error: true   # the report says what is left; the step after it replies
+        env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
+          AI_BUDGET: ${{ steps.budget-autofix.outputs.flag }}
+          PLAN: ${{ steps.go.outputs.plan }}
+        run: |
+          set -euo pipefail
+          mkdir -p .sdlc-output
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
+          claude -p "/sdlc:build-story mode=fix-tests plan=$PLAN failure=.sdlc-input/failure.log" \
+            "${ai_budget[@]}" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --plugin-dir "$RUNNER_TEMP/ponytail" \
+            --model "$MODEL" \
+            --max-turns 150 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Edit,MultiEdit,Bash,Task,Agent" \
+            --disallowedTools "Bash(git push*),Bash(gh *),Bash(curl *),Bash(wget *),Bash(terraform apply*),Bash(terraform destroy*),Bash(kubectl apply*),Bash(kubectl delete*),Bash(helm install*),Bash(helm upgrade*),Bash(helm uninstall*)" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/autofix-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/autofix-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Record AI spend (autofix)
+        if: always() && steps.budget-autofix.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: autofix
+          transcript: ${{ runner.temp }}/autofix-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Push the fix to this PR and reply
+        if: always() && steps.repro.outputs.failed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          ATTEMPT: ${{ steps.go.outputs.attempt }}
+        run: |
+          set -uo pipefail
+          reply() {
+            local out
+            out=$(gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$1" 2>&1) \
+              || echo "::warning title=Reply failed::Could not reply on #$PR: ${out:0:300}"
+          }
+          # The fix may not change the SDLC's own files: put them back.
+          protected=(.github .sdlc .claude intent specs designs plans releases runbooks CLAUDE.md REVIEW.md)
+          git ls-files -z -m -d -- "${protected[@]}" | xargs -0 -r git checkout HEAD --
+          git clean -fdq -- "${protected[@]}"
+          printf '%s\n' node_modules/ .venv/ venv/ __pycache__/ .pytest_cache/ target/ bin/ obj/ dist/ build/ \
+            coverage/ test-results/ playwright-report/ graphify-out/ .sdlc-output/ .sdlc-input/ .sdlc-plugin/ >> .git/info/exclude
+          report="$RUNNER_TEMP/report.md"
+          if [ -f .sdlc-output/fix-report.md ]; then cp .sdlc-output/fix-report.md "$report"; else echo "RESULT: NOT FIXED (no report was written; see the run)" > "$report"; fi
+          git add -A
+          if git diff --cached --quiet; then
+            { echo "Auto-fix attempt $ATTEMPT of $MAX_ATTEMPTS changed nothing:"; echo; cat "$report"; } > "$RUNNER_TEMP/reply.md"
+            reply "$RUNNER_TEMP/reply.md"
+            exit 0
+          fi
+          uid=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
+          git -c user.name="${APP_SLUG}[bot]" -c user.email="${uid}+${APP_SLUG}[bot]@users.noreply.github.com" \
+            commit -q -m "autofix: make the failing checks pass (attempt $ATTEMPT of $MAX_ATTEMPTS)" \
+                      -m "$(head -n 20 "$report")"
+          if ! git push -q origin "HEAD:$HEAD_REF"; then
+            echo "::error::could not push the fix to $HEAD_REF (the branch may have moved)."
+            exit 1
+          fi
+          sha=$(git rev-parse --short HEAD)
+          echo "Pushed $sha to $HEAD_REF."
+          {
+            echo "Auto-fix attempt $ATTEMPT of $MAX_ATTEMPTS pushed \`$sha\`: the review gate and the tests run again on it."
+            echo
+            cat "$report"
+            echo
+            echo '~~~'; git show --stat --format= HEAD; echo '~~~'
+          } > "$RUNNER_TEMP/reply.md"
+          reply "$RUNNER_TEMP/reply.md"

@@ -44,7 +44,7 @@ STATE_RE = re.compile(r"<!-- sdlc-spend (\{.*?\}) -->", re.S)
 DEFAULT_PER_RUN = {
     "intake": 5, "requirements": 15, "spec": 10, "review-spec": 10, "design": 10, "stack": 5,
     "plan": 10, "review-plan": 15, "plan-revise": 10, "build": 30, "review": 10, "advisory": 5,
-    "revise": 10, "prescreen": 10,
+    "revise": 10, "prescreen": 10, "autofix": 20,
 }
 WARN_AT = 0.8
 

@@ -16,6 +16,7 @@ files; `sdlc.json` is regenerated from, the rest are the project's to edit
 | `models` | `intake`, `spec`, `review`, `build`: the Claude model per headless stage |
 | `workflows` | `auto` (default): big jobs run as Claude Code workflows (parallel agents, then skeptics) above the thresholds in `plugins/sdlc/reference/workflows.md`: large requirement documents (`write-intent`), large or high-risk specs (`review-spec`), large story PRs (`review-story`); `always`; `off` (one session) |
 | `auto_build` | `true` (default): each story gets a plan PR and is built in CI when it merges (`sdlc-build.yml`); `false`: build by hand with `/sdlc:build-story` |
+| `autofix_attempts` | `2` (default): when a story PR's tests or traceability fail, the bot goes back to Build on the same branch and pushes a fix to the PR, at most this many times; `0` turns it off |
 | `budgets` | AI spend limits for the CI runs (see [AI spend limits](#ai-spend-limits)): `per_run_usd` (a cap per stage) and `monthly_usd` (0 = none) |
 
 Change it and re-run `/sdlc:init` (or `init_project.py --answers`), or move
@@ -180,6 +181,26 @@ prices, not money billed.
   revised too when the stories or screens change; `/sdlc revise design:
   <request>` changes only the mockups. Nothing is pushed unless the
   validators pass, and merging is still the reviewer's decision.
+
+## When a story PR's tests fail
+
+The `autofix` job in `sdlc-pr.yml` sends the story back to Build on the
+same branch:
+
+1. It runs the failing checks again (traceability, the static checks, the
+   test suite) and keeps their output. If they pass this time, the failure
+   was flaky: it says so on the PR and changes nothing.
+2. `build-story mode=fix-tests` reads that output, fixes the code (or
+   writes a missing planned test), runs the checks and the verifier, and
+   writes a report. It never deletes, skips or weakens a test to make it
+   pass; it changes a test only when the test contradicts the plan or
+   depends on timing, and says why.
+3. The fix is pushed to the same PR as an `autofix:` commit, with the
+   report as a comment. The review gate and the tests run again on it.
+
+After `autofix_attempts` (2) failed rounds it stops and asks a person on
+the PR. SDLC files are never changed, and the run has its own AI cap
+(`budgets.per_run_usd.autofix`, default 20).
 
 ## The fix lane
 
