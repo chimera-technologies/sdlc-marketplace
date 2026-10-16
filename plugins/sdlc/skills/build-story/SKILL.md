@@ -61,7 +61,12 @@ before `package.json` exists), the plan of the story that creates the
 project (usually S1) adds it, in its Files and Steps, and makes it work as
 the command expects: `test:file` runs any one test file with the right
 runner (for example Playwright for files under the end-to-end folder,
-Vitest otherwise). Every later story relies on these commands.
+Vitest otherwise). Every later story relies on these commands. If
+`.sdlc/build.yaml` names a `results_path`, the scaffold also makes every
+runner in `test_command` write JUnit XML there (one file per runner, in a
+folder no runner cleans), and browser tests save a screenshot at the end of
+every test into `evidence_path`, so each test's result and screenshot can be
+recorded (Xray, the test report).
 
 The plugin's build guard hook blocks any write to the repo's code paths
 until the preflight has succeeded, you are on the story branch, and the

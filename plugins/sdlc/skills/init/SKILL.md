@@ -116,9 +116,13 @@ After a spec's Technology and architecture decision is accepted:
    `test_file_command` (with `{file}`), `test_paths`, `code_paths`,
    `report_path`, the code quality commands `check_command` (whole-project
    linter and type checker), `lint_command` and `format_command` (one file,
-   with `{file}`; the hooks run them after each code write), and
+   with `{file}`; the hooks run them after each code write),
    `ui_library` (the UI component library the spec chose; empty without a
-   UI). Commands must not contain `#`.
+   UI), and `results_path` (a glob of the JUnit XML files `test_command`
+   writes, one per runner, for example `.sdlc-results/*.xml`) and
+   `evidence_path` (the folder the browser tests save screenshots in), which
+   give per-test results to the test report and to Xray. Commands must not
+   contain `#`.
    If the spec decided where it runs, also propose a `deploy` object for
    `.sdlc/deploy.yaml`, using only what the spec decided: `cloud` (`none`,
    `aws`, `azure`, `gcp`), `iac` (`none`, `terraform`), `iac_dir`,

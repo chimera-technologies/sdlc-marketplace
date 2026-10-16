@@ -48,6 +48,12 @@ on:
         required: true
       JIRA_API_TOKEN:
         required: false
+      XRAY_CLIENT_ID:
+        description: "Xray API key client id (test cases and results in Jira); empty = no Xray"
+        required: false
+      XRAY_CLIENT_SECRET:
+        description: "Xray API key client secret"
+        required: false
 
 permissions:
   contents: read
@@ -127,6 +133,19 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      - name: Keep the per-test results for the report job
+        # JUnit results and screenshots, for Xray; .sdlc/build.yaml keeps the paths relative to the repo.
+        if: always() && steps.stack.outputs.results_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdlc-test-results-${{ github.run_id }}
+          path: |
+            .sdlc/build.yaml
+            ${{ steps.stack.outputs.results_path }}
+            ${{ steps.stack.outputs.evidence_path }}
+          if-no-files-found: ignore
+          retention-days: 7
+
   report:
     needs: e2e
     # Also when the tests failed: the report says so.
@@ -140,6 +159,9 @@ jobs:
       issues: read          # the review gate comment
       pull-requests: read   # the plan and story PRs
     env:
+      XRAY_CLIENT_ID: ${{ secrets.XRAY_CLIENT_ID }}
+      XRAY_CLIENT_SECRET: ${{ secrets.XRAY_CLIENT_SECRET }}
+      XRAY_BASE_URL: ${{ vars.XRAY_BASE_URL }}   # empty = Xray's global cloud
       GH_TOKEN: ${{ github.token }}
       PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
     steps:
@@ -217,6 +239,31 @@ jobs:
           ref: ${{ inputs.sdlc_ref }}
           token: ${{ steps.app.outputs.token }}
           path: .sdlc-plugin
+
+      - name: Get the per-test results of the tests above
+        if: steps.find.outputs.story == 'true' && env.XRAY_CLIENT_ID != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: sdlc-test-results-${{ github.run_id }}
+          path: .sdlc-results-main
+
+      - name: Record the results in Xray
+        if: steps.find.outputs.story == 'true' && env.XRAY_CLIENT_ID != ''
+        continue-on-error: true   # Xray never blocks the loop
+        env:
+          JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+          JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          PLAN: ${{ steps.find.outputs.plan }}
+          NUMBER: ${{ steps.find.outputs.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -d .sdlc-results-main ] || { echo "No per-test results (results_path); nothing to record."; exit 0; }
+          cd .sdlc-results-main
+          results=$(sed -n 's/^results_path:[[:space:]]*\([^#]*[^#[:space:]]\).*/\1/p' .sdlc/build.yaml | head -n1)
+          python3 "../$PLUGIN_DIR/skills/build-story/scripts/xray_sync.py" results --plan "../$PLAN" \
+            --junit "${results:-**/*.xml}" --label "main, after PR #$NUMBER" --revision "$GITHUB_SHA" --run-url "$RUN_URL"
 
       - name: Write the test report
         id: write

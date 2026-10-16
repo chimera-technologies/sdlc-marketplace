@@ -32,6 +32,12 @@ outputs:
   check_command:
     description: "The project's static checks (lint, types) to run before the tests, or empty"
     value: ${{ steps.stack.outputs.check_command }}
+  results_path:
+    description: "Glob of the JUnit XML files the tests write (results_path), or empty"
+    value: ${{ steps.stack.outputs.results_path }}
+  evidence_path:
+    description: "Folder of the screenshots the browser tests save (evidence_path), or empty"
+    value: ${{ steps.stack.outputs.evidence_path }}
 
 runs:
   using: composite

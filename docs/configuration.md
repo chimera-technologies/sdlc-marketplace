@@ -63,6 +63,8 @@ not listed here.
 | `lint_command` | `npx eslint {file}`, `ruff check {file}` | One file (`{file}`), run by the code hooks after every code write; errors go back to Claude |
 | `format_command` | `npx prettier --write {file}`, `ruff format {file}` | One file (`{file}`), run by the code hooks after every code write; never blocks |
 | `ui_library` | `shadcn/ui`, `Angular Material`, `MudBlazor` | The UI component library the spec chose; the build uses it for every standard element |
+| `results_path` | `.sdlc-results/*.xml` | Glob of the JUnit XML files `test_command` writes (one per runner, in a folder no runner cleans): per-test results for Xray |
+| `evidence_path` | `test-results/` | Folder of the screenshots the browser tests save (Playwright `screenshot: 'on'`); attached to each test's result in Xray |
 | `graphify_version`, `ponytail_ref` | `0.9.71`, `v4.10.0` | Pins for the Build preflight's token-saving tools |
 
 The stack is the tech lead's decision in the spec; record it with
@@ -201,6 +203,32 @@ same branch:
 After `autofix_attempts` (2) failed rounds it stops and asks a person on
 the PR. SDLC files are never changed, and the run has its own AI cap
 (`budgets.per_run_usd.autofix`, default 20).
+
+## Test cases and results in Jira (Xray)
+
+With [Xray](https://marketplace.atlassian.com/apps/1211769) on the Jira
+site and an Xray API key in the repo secrets `XRAY_CLIENT_ID` and
+`XRAY_CLIENT_SECRET`, every story's test cases and results are kept in Jira
+(`xray_sync.py`):
+
+| When | In Jira |
+|---|---|
+| The plan is approved (the build starts) | One Xray **Test** per planned test case (each AC, EC and BUG), linked to the story; a **Test Plan** for the story; a **Test Execution** "planned" with every test at TODO |
+| The story PR's tests run | A **Test Execution** "PR #n" with each test PASSED or FAILED, the failure text, and the screenshots of every browser test |
+| The tests on the base branch after the merge | A **Test Execution** "main, after PR #n", the same way |
+
+Each execution is linked to the story and added to its Test Plan, so the
+story shows its tests and their history. A test is the same Xray Test from
+run to run. Tests named for the story but not in the plan are recorded too.
+Xray never blocks a run: without the secrets the steps skip, and an API
+problem is a warning.
+
+Set up once: install Xray, map its work types in the space (Test, Test
+Execution, Test Plan, Test Set, Precondition), create an API key, add the
+two secrets. The project's tests must write JUnit XML (`results_path`) and
+screenshots (`evidence_path`); the scaffold story sets this up when the keys
+are in `.sdlc/build.yaml`. A regional Xray (EU, US, AU) sets the repo
+variable `XRAY_BASE_URL`.
 
 ## The fix lane
 

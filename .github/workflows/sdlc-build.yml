@@ -67,6 +67,12 @@ on:
         required: true
       JIRA_API_TOKEN:
         required: false
+      XRAY_CLIENT_ID:
+        description: "Xray API key client id (test cases and results in Jira); empty = no Xray"
+        required: false
+      XRAY_CLIENT_SECRET:
+        description: "Xray API key client secret"
+        required: false
 
 permissions:
   contents: read
@@ -493,6 +499,9 @@ jobs:
       SPEC: ${{ matrix.item.spec }}
       STORY: ${{ matrix.item.story }}
       TITLE: ${{ matrix.item.title }}
+      XRAY_CLIENT_ID: ${{ secrets.XRAY_CLIENT_ID }}
+      XRAY_CLIENT_SECRET: ${{ secrets.XRAY_CLIENT_SECRET }}
+      XRAY_BASE_URL: ${{ vars.XRAY_BASE_URL }}   # empty = Xray's global cloud
     steps:
       - name: Scope the App token to this repo and the plugin repo
         id: app-repos
@@ -570,6 +579,13 @@ jobs:
           [ -n "$key" ] || { echo "No Jira key in $PLAN; skipping."; exit 0; }
           python3 "$SCRIPTS/jira_story.py" "$key" move in-progress
           python3 "$SCRIPTS/jira_story.py" "$key" comment "Build started on $BRANCH from the approved plan $PLAN. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Create the story's tests in Xray (the plan is approved)
+        if: env.XRAY_CLIENT_ID != ''
+        continue-on-error: true   # Xray never blocks the loop
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: python3 "$SCRIPTS/xray_sync.py" plan --plan "$PLAN"
 
       - name: Preflight (Graphify, Ponytail)
         run: |

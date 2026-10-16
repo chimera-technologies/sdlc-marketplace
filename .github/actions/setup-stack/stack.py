@@ -14,6 +14,8 @@ build.yaml keys (all optional except test_command for the Test stage):
   test_file_command: npx playwright test {file} --reporter=line
   report_path: playwright-report/      # uploaded as an artifact after tests
   check_command: npx tsc --noEmit && npx eslint .   # static checks, run before the tests
+  results_path: .sdlc-results/*.xml    # JUnit XML the tests write (per-test results, Xray)
+  evidence_path: test-results/         # screenshots the browser tests save
 
 Standard library only. Exit 1 on an unknown toolchain.
 """
@@ -28,7 +30,8 @@ from pathlib import Path
 # Infrastructure tools are toolchains too: the spec decides which.
 SUPPORTED = ["node", "python", "java", "dotnet", "go", "terraform", "helm", "kubectl"]
 V_PREFIXED = {"helm", "kubectl"}   # their setup actions want v1.2.3
-KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path", "check_command"]
+KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path", "check_command",
+        "results_path", "evidence_path"]
 
 
 def load_guard():

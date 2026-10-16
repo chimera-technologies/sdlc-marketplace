@@ -84,7 +84,10 @@ Jira ticket / document / breach
   so any Jira workflow works, and a story never moves backwards.
 - **PR review**: conformance to plan, spec, design, `REVIEW.md`, `CLAUDE.md`
   and the security policy gates the PR; advisory reviewers only comment.
-- **Test**: tests run only after the review gate. When a story PR's tests
+- **Test**: tests run only after the review gate. With Xray, each story's
+  test cases are Xray Tests created when the plan is approved, and every run
+  (the story PR, then main) is a Test Execution with each test's result and
+  screenshots. When a story PR's tests
   fail, the story goes back to Build on the same branch automatically (up to
   `autofix_attempts`, default 2) and the fix is pushed to the same PR. The
   project's own test
