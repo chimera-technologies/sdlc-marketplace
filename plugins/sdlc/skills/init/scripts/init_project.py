@@ -72,7 +72,7 @@ def write_lf(path, text):
 DEFAULT_BUDGETS = {
     "intake": 5, "requirements": 15, "spec": 10, "review-spec": 10, "design": 10, "stack": 5,
     "plan": 10, "review-plan": 15, "plan-revise": 10, "build": 30, "review": 10, "advisory": 5,
-    "revise": 10, "prescreen": 10, "autofix": 20,
+    "revise": 10, "prescreen": 10, "autofix": 20, "review-fix": 20,
 }
 
 
@@ -418,6 +418,9 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
 - A story PR whose tests fail goes back to Build by itself: the bot pushes a
   fix to the same PR (`autofix:` commits, at most `autofix_attempts`), then
   asks a person.
+- The review gate posts each high and medium finding as a PR comment. The
+  reviewer answers it: `/sdlc fix <n> [how]` (the bot fixes it on the branch)
+  or `/sdlc dismiss <n> <reason>` (the next review does not report it).
 - Code: reuse what `PATTERNS.md` names before writing anything new, and add
   each new reusable piece to it; build UI from the `ui_library` in
   `.sdlc/build.yaml`. The plugin's hooks block secrets, lock-file edits and
@@ -568,15 +571,24 @@ def render_callers(a):
                 "      fingerprint: ${{ github.event.client_payload.fingerprint || inputs.fingerprint || '' }}\n"
                 "      signal: ${{ github.event.client_payload.signal && toJSON(github.event.client_payload.signal) || inputs.signal || '{}' }}\n")))
 
+    comment_jobs = []
     if s["plan"] or s["design"] or s["build"]:
         # '/sdlc revise <request>' on an intent, spec or plan PR (sdlc-revise.yml checks who asked).
+        comment_jobs.append("  revise:\n" + call(
+            a, "sdlc-revise.yml", extra_with=f"      model: {m['spec']}\n",
+            if_expr="github.event.issue.pull_request && startsWith(github.event.comment.body, '/sdlc revise')"))
+    if s["build"] or s["pr_review"]:
+        # '/sdlc fix <n>' and '/sdlc dismiss <n>' answering a review finding on a story or fix PR.
+        comment_jobs.append("  findings:\n" + call(
+            a, "sdlc-fix-findings.yml", extra_with=f"      model: {m['build']}\n",
+            if_expr=("github.event.issue.pull_request && (startsWith(github.event.comment.body, '/sdlc fix')"
+                     " || startsWith(github.event.comment.body, '/sdlc dismiss'))")))
+    if comment_jobs:
         files[".github/workflows/sdlc-comment.yml"] = (
-            header(a, "SDLC comment", "PR comments: '/sdlc revise <request>' on an intent, spec or plan PR revises it on its branch.")
+            header(a, "SDLC comment", "PR comments: '/sdlc revise' on intent, spec and plan PRs; '/sdlc fix' and '/sdlc dismiss' answering review findings.")
             + "on:\n  issue_comment:\n    types: [created]\n\n"
             + "permissions:\n  contents: read\n\n"
-            + "jobs:\n  revise:\n"
-            + call(a, "sdlc-revise.yml", extra_with=f"      model: {m['spec']}\n",
-                   if_expr="github.event.issue.pull_request && startsWith(github.event.comment.body, '/sdlc revise')"))
+            + "jobs:\n" + "\n".join(comment_jobs))
 
     if s["maintain"]:
         files[".github/workflows/sdlc-maintain.yml"] = (

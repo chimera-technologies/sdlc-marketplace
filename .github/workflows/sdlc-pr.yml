@@ -174,6 +174,17 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Findings the reviewer dismissed
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          # /sdlc dismiss N <reason> comments: the review does not report those findings again.
+          mkdir -p .sdlc-input
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq '.[]' | jq -s '.' > "$RUNNER_TEMP/pr-comments.json"
+          python3 "$PLUGIN_DIR/skills/review-story/scripts/findings.py" dismissed --comments "$RUNNER_TEMP/pr-comments.json" --out .sdlc-input/dismissed.md
+          if [ -s .sdlc-input/dismissed.md ]; then echo "The reviewer dismissed earlier findings:"; cat .sdlc-input/dismissed.md; fi
+
       - name: AI budget check (review)
         id: budget-review
         uses: ./.sdlc-plugin/.github/actions/ai-budget
@@ -193,7 +204,9 @@ jobs:
           mkdir -p .sdlc-output
           # Claude holds no GitHub or Jira token; it reads the repo and writes one JSON file.
           read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
-          claude -p "/sdlc:review-story mode=headless base=origin/$BASE_BRANCH" \
+          prompt="/sdlc:review-story mode=headless base=origin/$BASE_BRANCH"
+          if [ -s .sdlc-input/dismissed.md ]; then prompt="$prompt dismissed=.sdlc-input/dismissed.md"; fi
+          claude -p "$prompt" \
             "${ai_budget[@]}" \
             --plugin-dir "$PLUGIN_DIR" \
             --model "$MODEL" \
@@ -218,14 +231,24 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           FAIL_ON: ${{ needs.config.outputs.fail_on }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -uo pipefail
+          # The step shell has -e: catch the gate's exit code so the comment is always updated.
+          code=0
           python3 .sdlc-plugin/plugins/sdlc/skills/review-spec/scripts/render_review.py \
             .sdlc-output/pr-review.json --markdown "$RUNNER_TEMP/review.md" \
-            --title "Conformance review" --fail-on "$FAIL_ON" > "$RUNNER_TEMP/verdict.txt"
-          code=$?
+            --title "Conformance review" --fail-on "$FAIL_ON" > "$RUNNER_TEMP/verdict.txt" || code=$?
           verdict=$(cat "$RUNNER_TEMP/verdict.txt")
-          body="<!-- sdlc-review-gate -->"$'\n'"$(cat "$RUNNER_TEMP/review.md")"$'\n'"Gate: fails on \`$FAIL_ON\` or worse."
+          # Each high or medium finding becomes its own comment the reviewer answers.
+          python3 "$PLUGIN_DIR/skills/review-story/scripts/findings.py" comments .sdlc-output/pr-review.json --sha "$HEAD_SHA" \
+            --out "$RUNNER_TEMP/findings.json" >/dev/null || echo '[]' > "$RUNNER_TEMP/findings.json"
+          count=$(jq 'length' "$RUNNER_TEMP/findings.json")
+          how=""
+          if [ "$count" -gt 0 ]; then
+            how=$'\n'"The $count high and medium finding(s) are posted below as separate comments. Reply \`/sdlc fix <n>\` (optionally with how) for the bot to fix one on this branch, or \`/sdlc dismiss <n> <reason>\` to accept it as it is."$'\n'
+          fi
+          body="<!-- sdlc-review-gate -->"$'\n'"$(cat "$RUNNER_TEMP/review.md")"$'\n'"$how""Gate: fails on \`$FAIL_ON\` or worse."
           # One sticky comment per PR, updated on every push.
           id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
                --jq '[.[] | select(.body | startswith("<!-- sdlc-review-gate -->"))][0].id // empty')
@@ -238,7 +261,19 @@ jobs:
           gh pr edit "$PR" --remove-label review:clean,review:concerns,review:failed >/dev/null 2>&1 || true
           gh pr edit "$PR" --add-label "review:$verdict" >/dev/null 2>&1 || true
           cat "$RUNNER_TEMP/review.md" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$code" -ne 0 ]; then echo "::error::Review gate: findings at or above '$FAIL_ON' (or the review did not run). Fix them, then push."; exit 1; fi
+          # The previous review's finding comments are minimized as outdated, then this review's are posted.
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- sdlc-finding ")) | .node_id' | while read -r node; do
+            # shellcheck disable=SC2016  # $id is a GraphQL variable
+            gh api graphql -f query='mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId } }' \
+              -f id="$node" >/dev/null 2>&1 || true
+          done
+          for i in $(seq 0 $((count - 1))); do
+            jq -r ".[$i].body" "$RUNNER_TEMP/findings.json" > "$RUNNER_TEMP/finding.md"
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$RUNNER_TEMP/finding.md" >/dev/null \
+              || echo "::warning::could not post finding $((i + 1)) as a comment"
+          done
+          if [ "$code" -ne 0 ]; then echo "::error::Review gate: findings at or above '$FAIL_ON' (or the review did not run). Answer each finding comment with /sdlc fix or /sdlc dismiss, or fix and push."; exit 1; fi
 
       - name: Upload review evidence
         if: always()

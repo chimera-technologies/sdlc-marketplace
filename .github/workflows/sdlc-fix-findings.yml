@@ -1,0 +1,336 @@
+name: "SDLC fix review findings"
+
+# Reusable workflow of the sdlc plugin (workflow_call). The reviewer answers a review finding comment on a story or fix PR; the bot acts on the same PR.
+# Projects call it from the .github/workflows/sdlc-*.yml files that
+# /sdlc:init writes, pinned to the same tag as sdlc_ref.
+#
+#   /sdlc fix 1 [2 ...] [how]     back to Build on the PR's branch: build-story
+#                                 mode=fix-findings fixes those findings (the
+#                                 reviewer's "how" first), checks and verifies,
+#                                 and pushes to the same PR; the review gate and
+#                                 the tests run again
+#   /sdlc fix all [how]           every finding of the latest review
+#   /sdlc dismiss 1 [2 ...] why   accept them as they are; the next review does
+#                                 not report them again (a dismissed high
+#                                 finding re-runs the gate now)
+#
+# Only the repo's owners, members and collaborators can ask; the comment is
+# data for the skill, never instructions. The SDLC's own files never change,
+# except the story's design (designs/) when the reviewer asks for it.
+
+on:
+  workflow_call:
+    inputs:
+      sdlc_ref:
+        description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
+        type: string
+        required: true
+      sdlc_repo:
+        description: "The plugin marketplace repo"
+        type: string
+        default: chimera-technologies/sdlc-marketplace
+      app_id:
+        description: "GitHub App (sdlc-bot) ID: vars.SDLC_APP_ID"
+        type: string
+        required: true
+      base_branch:
+        description: "The protected branch artifacts merge into"
+        type: string
+        default: main
+      jira_base_url:
+        description: "vars.JIRA_BASE_URL (unused here; same inputs as the other callers)"
+        type: string
+        default: ""
+      jira_user_email:
+        description: "vars.JIRA_USER_EMAIL (unused here)"
+        type: string
+        default: ""
+      model:
+        description: "Claude model for the fix"
+        type: string
+        default: claude-opus-5-5
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude subscription token (claude setup-token); or set ANTHROPIC_API_KEY"
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      SDLC_APP_PRIVATE_KEY:
+        description: "sdlc-bot GitHub App private key"
+        required: true
+      JIRA_API_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
+  SCRIPTS: .sdlc-plugin/plugins/sdlc/skills/build-story/scripts
+  FINDINGS: .sdlc-plugin/plugins/sdlc/skills/review-story/scripts/findings.py
+  PR: ${{ github.event.issue.number }}
+  COMMENT_ID: ${{ github.event.comment.id }}
+  COMMENT_URL: ${{ github.event.comment.html_url }}
+  WHO: ${{ github.event.comment.user.login }}
+
+jobs:
+  act:
+    if: >-
+      github.event.issue.pull_request
+      && (startsWith(github.event.comment.body, '/sdlc fix') || startsWith(github.event.comment.body, '/sdlc dismiss'))
+      && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: review-fix-${{ github.event.issue.number }}
+      cancel-in-progress: false   # requests on one PR run one after another
+    env:
+      SDLC_HEADLESS: "1"
+      # Code may go anywhere the stack needs it; the SDLC's own files may not change (the
+      # story's design may, when the reviewer asks for it).
+      SDLC_WRITE_ALLOW: "*"
+      SDLC_WRITE_DENY: ".github/,.sdlc/,.claude/,intent/,specs/,plans/,releases/,runbooks/,CLAUDE.md,REVIEW.md,.sdlc-plugin/"
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      MODEL: ${{ inputs.model }}
+    steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint short-lived GitHub App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
+
+      - name: Check out the sdlc plugin (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sdlc_repo }}
+          ref: ${{ inputs.sdlc_ref }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+          persist-credentials: false
+
+      - name: Which PR, findings and command
+        id: cmd
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          say() { gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$1" >/dev/null || echo "::warning::could not reply on #$PR"; }
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" -f content=eyes >/dev/null || true
+          info=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json headRefName,state,isCrossRepository \
+                   -q '"\(.headRefName) \(.state) \(.isCrossRepository)"')
+          read -r head state cross <<<"$info"
+          if [ "$state" != OPEN ] || [ "$cross" != false ] || { [[ "$head" != story/* ]] && [[ "$head" != fix/* ]]; }; then
+            say "Not acting: review findings are fixed on open story and fix PRs from this repo (this branch is \`$head\`)."
+            echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          printf '%s' "$BODY" > "$RUNNER_TEMP/comment.txt"
+          cmd=$(python3 "$FINDINGS" command "$(cat "$RUNNER_TEMP/comment.txt")")
+          action=$(jq -r '.action // empty' <<<"$cmd")
+          numbers=$(jq -r '.numbers | map(tostring) | join(" ")' <<<"$cmd")
+          all=$(jq -r '.all' <<<"$cmd")
+          jq -r '.text' <<<"$cmd" > "$RUNNER_TEMP/request.md"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq '.[]' | jq -s '.' > "$RUNNER_TEMP/pr-comments.json"
+          if [ "$all" = true ]; then flags=(--all); else flags=(--numbers); for n in $numbers; do flags+=("$n"); done; fi
+          picked=$(python3 "$FINDINGS" pick --comments "$RUNNER_TEMP/pr-comments.json" "${flags[@]}" --out "$RUNNER_TEMP/findings.md")
+          found=$(jq -r '.found | map(tostring) | join(" ")' <<<"$picked")
+          missing=$(jq -r '.missing | map(tostring) | join(" ")' <<<"$picked")
+          if [ -z "$found" ]; then
+            say "Not acting: no review finding${missing:+ $missing} in the latest review. Answer a finding comment with \`/sdlc fix <n>\` or \`/sdlc dismiss <n> <reason>\`."
+            echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          high=$(jq -r '.severities | index("high") != null' <<<"$picked")
+          { echo "go=true"; echo "action=$action"; echo "found=$found"; echo "missing=$missing"; echo "head=$head"; echo "high=$high"; } >> "$GITHUB_OUTPUT"
+          echo "$action findings: $found${missing:+ (not found: $missing)} on $head"
+
+      - uses: actions/checkout@v4
+        if: steps.cmd.outputs.go == 'true'
+        with:
+          ref: ${{ steps.cmd.outputs.head }}
+          token: ${{ steps.app.outputs.token }}
+          fetch-depth: 0
+          path: project
+
+      - name: Dismiss
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'dismiss'
+        working-directory: project
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          FOUND: ${{ steps.cmd.outputs.found }}
+          HIGH: ${{ steps.cmd.outputs.high }}
+          HEAD: ${{ steps.cmd.outputs.head }}
+        run: |
+          set -euo pipefail
+          reason=$(cat "$RUNNER_TEMP/request.md")
+          msg="Dismissed finding(s) $FOUND as asked by @$WHO${reason:+: \"$reason\"}. The next review will not report them again."
+          if [ "$HIGH" = true ]; then
+            # A dismissed high finding was blocking the gate: run the review again now.
+            uid=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
+            git -c user.name="${APP_SLUG}[bot]" -c user.email="${uid}+${APP_SLUG}[bot]@users.noreply.github.com" \
+              commit -q --allow-empty -m "review: @$WHO dismissed finding(s) $FOUND" -m "$COMMENT_URL"
+            git push -q origin "HEAD:$HEAD"
+            msg="$msg The review gate runs again now."
+          fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$msg" >/dev/null || echo "::warning::could not reply on #$PR"
+
+      - name: Read the Ponytail pin
+        id: pins
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        working-directory: project
+        run: |
+          ref=$(sed -n 's/^ponytail_ref:[[:space:]]*\([^[:space:]#]*\).*/\1/p' .sdlc/build.yaml | head -n1)
+          echo "ponytail_ref=${ref:-v4.10.0}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Ponytail (pinned)
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        uses: actions/checkout@v4
+        with:
+          repository: DietrichGebert/ponytail
+          ref: ${{ steps.pins.outputs.ponytail_ref }}
+          path: .sdlc-ponytail
+          persist-credentials: false
+
+      - name: Put the project at the workspace root
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        run: |
+          set -euo pipefail
+          mv .sdlc-ponytail "$RUNNER_TEMP/ponytail"
+          mv .sdlc-plugin project/.sdlc-plugin
+          shopt -s dotglob
+          mv project/* .
+          rmdir project
+
+      - uses: actions/setup-node@v4
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Set up the project's stack (.sdlc/build.yaml)
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        uses: ./.sdlc-plugin/.github/actions/setup-stack
+        with:
+          require-tests: "true"
+
+      - name: Preflight (Graphify, Ponytail)
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        run: |
+          # Exit 3 only means Ponytail is not active yet; it loads with the Claude session below.
+          python3 "$SCRIPTS/build_preflight.py" || [ $? -eq 3 ]
+
+      - name: AI budget check (review-fix)
+        id: budget-review-fix
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: check
+          stage: review-fix
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Fix the findings with build-story (headless)
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        continue-on-error: true   # the report says what is left; the step after it replies
+        env:
+          CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0"   # wait for workflow agents to finish; the job timeout is the limit
+          AI_BUDGET: ${{ steps.budget-review-fix.outputs.flag }}
+          HEAD: ${{ steps.cmd.outputs.head }}
+        run: |
+          set -euo pipefail
+          mkdir -p .sdlc-input .sdlc-output
+          cp "$RUNNER_TEMP/findings.md" .sdlc-input/findings.md
+          cp "$RUNNER_TEMP/request.md" .sdlc-input/request.md
+          plan=$(grep -lx "branch: $HEAD" plans/*.md 2>/dev/null | head -n1 || true)
+          read -ra ai_budget <<<"${AI_BUDGET:-}"   # --max-budget-usd <n> from the budget check
+          claude -p "/sdlc:build-story mode=fix-findings${plan:+ plan=$plan} findings=.sdlc-input/findings.md request=.sdlc-input/request.md" \
+            "${ai_budget[@]}" \
+            --plugin-dir "$PLUGIN_DIR" \
+            --plugin-dir "$RUNNER_TEMP/ponytail" \
+            --model "$MODEL" \
+            --max-turns 150 \
+            --strict-mcp-config \
+            --allowedTools "Read,Glob,Grep,Write,Edit,MultiEdit,Bash,Task,Agent" \
+            --disallowedTools "Bash(git push*),Bash(gh *),Bash(curl *),Bash(wget *),Bash(terraform apply*),Bash(terraform destroy*),Bash(kubectl apply*),Bash(kubectl delete*),Bash(helm install*),Bash(helm upgrade*),Bash(helm uninstall*)" \
+            --output-format stream-json --verbose \
+            > "$RUNNER_TEMP/review-fix-transcript.jsonl"
+          tail -n1 "$RUNNER_TEMP/review-fix-transcript.jsonl" | jq -r '"turns: \(.num_turns)  cost: \(.total_cost_usd)  error: \(.is_error)"' || true
+
+      - name: Record AI spend (review-fix)
+        if: always() && steps.budget-review-fix.outcome == 'success'
+        uses: ./.sdlc-plugin/.github/actions/ai-budget
+        with:
+          mode: record
+          stage: review-fix
+          transcript: ${{ runner.temp }}/review-fix-transcript.jsonl
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Render a changed design
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        run: |
+          set -uo pipefail
+          # The reviewer asked for the design to change: render its screens again and check it.
+          for m in $(git status --porcelain -- designs | sed -n 's|^.. \(designs/[^/]*\)/.*|\1/design.md|p' | sort -u); do
+            [ -f "$m" ] || continue
+            python3 .sdlc-plugin/plugins/sdlc/skills/design-ui/scripts/render_mockups.py "$m" \
+              && python3 .sdlc-plugin/plugins/sdlc/skills/design-ui/scripts/validate_design.py --owners .sdlc/owners.yaml "$m" \
+              || echo "::warning::the revised design $m does not render or validate; the review will flag it"
+          done
+
+      - name: Push the fix to this PR and reply
+        if: always() && steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          FOUND: ${{ steps.cmd.outputs.found }}
+          HEAD: ${{ steps.cmd.outputs.head }}
+        run: |
+          set -uo pipefail
+          reply() {
+            local out
+            out=$(gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$1" 2>&1) \
+              || echo "::warning title=Reply failed::Could not reply on #$PR: ${out:0:300}"
+          }
+          # The fix may not change the SDLC's own files (the design may change): put them back.
+          protected=(.github .sdlc .claude intent specs plans releases runbooks CLAUDE.md REVIEW.md)
+          git ls-files -z -m -d -- "${protected[@]}" | xargs -0 -r git checkout HEAD --
+          git clean -fdq -- "${protected[@]}"
+          printf '%s\n' node_modules/ .venv/ venv/ __pycache__/ .pytest_cache/ target/ bin/ obj/ dist/ build/ \
+            coverage/ test-results/ playwright-report/ graphify-out/ .sdlc-output/ .sdlc-input/ .sdlc-plugin/ .sdlc-results/ >> .git/info/exclude
+          report="$RUNNER_TEMP/report.md"
+          if [ -f .sdlc-output/fix-report.md ]; then cp .sdlc-output/fix-report.md "$report"; else echo "RESULT: NOT FIXED (no report was written; see the run)" > "$report"; fi
+          git add -A
+          if git diff --cached --quiet; then
+            { echo "The bot looked at finding(s) $FOUND, as asked by @$WHO, and changed nothing:"; echo; cat "$report"; } > "$RUNNER_TEMP/reply.md"
+            reply "$RUNNER_TEMP/reply.md"
+            exit 0
+          fi
+          uid=$(gh api "users/${APP_SLUG}[bot]" --jq .id)
+          git -c user.name="${APP_SLUG}[bot]" -c user.email="${uid}+${APP_SLUG}[bot]@users.noreply.github.com" \
+            commit -q -m "review-fix: finding(s) $FOUND, as asked by @$WHO" -m "$COMMENT_URL" -m "$(head -n 20 "$report")"
+          if ! git push -q origin "HEAD:$HEAD"; then
+            echo "::error::could not push the fix to $HEAD (the branch may have moved; ask again)."
+            exit 1
+          fi
+          sha=$(git rev-parse --short HEAD)
+          echo "Pushed $sha to $HEAD."
+          {
+            echo "Fixed finding(s) $FOUND as asked by @$WHO in [this comment]($COMMENT_URL): \`$sha\`. The review gate and the tests run again on it."
+            echo
+            cat "$report"
+            echo
+            echo '~~~'; git show --stat --format= HEAD; echo '~~~'
+          } > "$RUNNER_TEMP/reply.md"
+          reply "$RUNNER_TEMP/reply.md"

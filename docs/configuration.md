@@ -230,6 +230,25 @@ screenshots (`evidence_path`); the scaffold story sets this up when the keys
 are in `.sdlc/build.yaml`. A regional Xray (EU, US, AU) sets the repo
 variable `XRAY_BASE_URL`.
 
+## Answering review findings on a PR
+
+The review gate posts its summary as one comment, and each **high** and
+**medium** finding as its own numbered comment (low findings stay in the
+summary). The comments of an earlier review are minimized as outdated. The
+reviewer answers with a comment:
+
+| Comment | What happens |
+|---|---|
+| `/sdlc fix 1` | `build-story mode=fix-findings` fixes finding 1 on the PR's branch as suggested, checks and verifies, and pushes to the PR; the review gate and the tests run again |
+| `/sdlc fix 1 2 keep the links, update the design` | Fixes findings 1 and 2 the reviewer's way (the story's design may change when asked) |
+| `/sdlc fix all` | Every finding of the latest review |
+| `/sdlc dismiss 2 fine for the prototype` | Accepts finding 2; the next review does not report it again. Dismissing a high finding re-runs the gate at once |
+
+Only owners, members and collaborators can ask (`sdlc-fix-findings.yml`,
+called from `sdlc-comment.yml`). The fix has its own AI cap
+(`budgets.per_run_usd.review-fix`, default 20) and never changes the plan,
+the spec or other SDLC files.
+
 ## The fix lane
 
 Small changes that restore behaviour (a bug fix, a typo, a dependency bump)
