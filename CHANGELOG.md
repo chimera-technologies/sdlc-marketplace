@@ -4,6 +4,27 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.21.0 (2026-10-16)
+
+- **Failing tests on a story PR go back to Build automatically.** New job
+  `autofix` in `sdlc-pr.yml`: when `pr / e2e` (the test suite) or
+  `pr / traceability` fails on a story PR, it runs the failing checks again
+  to capture what fails (and says "flaky, nothing changed" if they pass),
+  runs `build-story mode=fix-tests` on the same branch, and pushes the fix
+  to the same PR as an `autofix:` commit with a report. The review gate and
+  the tests then run again. It never deletes or weakens a test to pass, and
+  never changes SDLC files. At most `autofix_attempts` per PR (new
+  `.sdlc/sdlc.json` key, default 2; 0 = off), then it comments for a
+  person. New AI budget stage `autofix` (default cap 20).
+- New `sdlc-pr` inputs `autofix_attempts` (default 2) and `fix_model`
+  (default claude-opus-5-5); `init` passes them (0 when Build is off).
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.21.0` and merge the PR. It adds `autofix_attempts: 2`
+to `.sdlc/sdlc.json` and passes it to `sdlc-pr`. Set it to `0` and re-run
+init to keep fixing failed tests by hand.
+
 ## v0.20.2 (2026-10-16)
 
 These two fixes were meant for v0.20.1 but were pushed after it merged.

@@ -84,7 +84,10 @@ Jira ticket / document / breach
   so any Jira workflow works, and a story never moves backwards.
 - **PR review**: conformance to plan, spec, design, `REVIEW.md`, `CLAUDE.md`
   and the security policy gates the PR; advisory reviewers only comment.
-- **Test**: tests run only after the review gate; the project's own test
+- **Test**: tests run only after the review gate. When a story PR's tests
+  fail, the story goes back to Build on the same branch automatically (up to
+  `autofix_attempts`, default 2) and the fix is pushed to the same PR. The
+  project's own test
   command from `.sdlc/build.yaml`, on its own toolchain. After a story PR
   merges and the tests on main have run, `test_report.py` writes
   `test-reports/<plan-id>/` (every test named for the story and its status

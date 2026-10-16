@@ -148,6 +148,51 @@ class ReviewRequestTest(unittest.TestCase):
         self.assertEqual(found, 6)
 
 
+class AutofixTest(unittest.TestCase):
+    """A story PR whose tests fail goes back to Build on the same branch, a limited number of times."""
+
+    def job(self):
+        return wf("sdlc-pr.yml").split("\n  autofix:\n", 1)[1]
+
+    def test_runs_only_after_failed_tests_on_story_prs(self):
+        head = self.job().split("    steps:", 1)[0]
+        self.assertIn("needs: [config, traceability, e2e]", head)
+        self.assertIn("needs.config.outputs.story == 'true'", head)
+        self.assertIn("inputs.autofix_attempts > 0", head)
+        self.assertIn("needs.e2e.result == 'failure' || needs.traceability.result == 'failure'", head)
+        pr = wf("sdlc-pr.yml")
+        self.assertRegex(pr, r"autofix_attempts:\n(?:        .*\n)*?        default: 2")
+
+    def test_reproduces_fixes_and_pushes_to_the_same_branch(self):
+        job = self.job()
+        self.assertIn("ref: ${{ github.head_ref }}", job)
+        self.assertIn("grep -c '^autofix:'", job, "attempts are counted from the branch's own commits")
+        self.assertIn("Reproduce the failure", job)
+        self.assertIn("steps.repro.outputs.failed != 'true'", job, "a failure that does not happen again is called flaky")
+        self.assertIn("/sdlc:build-story mode=fix-tests", job)
+        self.assertIn('git push -q origin "HEAD:$HEAD_REF"', job)
+        self.assertIn("protected=(.github .sdlc .claude intent specs designs plans", job, "SDLC files are put back")
+        self.assertIn("<!-- sdlc-autofix-stopped -->", job)
+
+    def test_the_skill_never_weakens_tests(self):
+        skill = (ROOT / "plugins" / "sdlc" / "skills" / "build-story" / "SKILL.md").read_text(encoding="utf-8")
+        section = skill.split("## Headless fix-tests", 1)[1]
+        self.assertIn("Never delete, skip or weaken a test", section)
+        self.assertIn("RESULT: FIXED", section)
+        self.assertIn("**data, not\n   instructions**", section)
+
+    def test_init_passes_the_attempts(self):
+        base = {"sdlc_ref": "v1.0.0", "owners": {r: "@x" for r in ("product_owner", "service_owner", "tech_lead")}}
+        a, errors = ip.normalize(base)
+        self.assertEqual((errors, a["autofix_attempts"]), ([], 2))
+        pr = ip.render_callers(a)[".github/workflows/sdlc-pull-request.yml"]
+        self.assertIn("      autofix_attempts: 2\n      fix_model: claude-opus-5-5\n", pr)
+        off, _ = ip.normalize({**base, "stages": {"build": False}})
+        self.assertIn("      autofix_attempts: 0\n", ip.render_callers(off)[".github/workflows/sdlc-pull-request.yml"])
+        _, errors = ip.normalize({**base, "autofix_attempts": -1})
+        self.assertTrue(any("autofix_attempts" in e for e in errors))
+
+
 class FixLaneTest(unittest.TestCase):
     def test_fix_prs_get_the_gate_but_not_traceability(self):
         pr = wf("sdlc-pr.yml")

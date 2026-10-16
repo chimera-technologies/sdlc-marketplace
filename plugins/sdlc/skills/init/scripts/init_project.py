@@ -72,7 +72,7 @@ def write_lf(path, text):
 DEFAULT_BUDGETS = {
     "intake": 5, "requirements": 15, "spec": 10, "review-spec": 10, "design": 10, "stack": 5,
     "plan": 10, "review-plan": 15, "plan-revise": 10, "build": 30, "review": 10, "advisory": 5,
-    "revise": 10, "prescreen": 10,
+    "revise": 10, "prescreen": 10, "autofix": 20,
 }
 
 
@@ -92,6 +92,10 @@ def normalize(answers):
     a["models"] = {**DEFAULT_MODELS, **(a.get("models") or {})}
     # Automatic Build: plan PR, then build, for each story in turn (sdlc-build.yml).
     a["auto_build"] = bool(a.get("auto_build", True))
+    # Story PRs whose tests fail go back to Build this many times before a person (0 = off).
+    a["autofix_attempts"] = a.get("autofix_attempts", 2)
+    if not isinstance(a["autofix_attempts"], int) or isinstance(a["autofix_attempts"], bool) or a["autofix_attempts"] < 0:
+        errors.append("autofix_attempts must be a whole number, 0 or more (0 = off)")
     # AI spend limits (.github/actions/ai-budget): a cap per run of each stage, and
     # an optional monthly limit for the project (0 = none).
     b = a.get("budgets") or {}
@@ -409,6 +413,9 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
   `/sdlc revise <request>` and the bot makes the change on its branch.
 - Small fixes skip the full loop: `/sdlc:fix` (a `fix/<name>` branch, a test
   first, then the review gate and the tests).
+- A story PR whose tests fail goes back to Build by itself: the bot pushes a
+  fix to the same PR (`autofix:` commits, at most `autofix_attempts`), then
+  asks a person.
 - Code: reuse what `PATTERNS.md` names before writing anything new, and add
   each new reusable piece to it; build UI from the `ui_library` in
   `.sdlc/build.yaml`. The plugin's hooks block secrets, lock-file edits and
@@ -460,7 +467,9 @@ def render_callers(a):
     if s["ui_design"]:
         jobs.append("  design-check:\n" + call(a, "sdlc-design-check.yml", if_expr="github.event.action != 'closed'"))
     if s["pr_review"] or s["test"]:
-        jobs.append("  pr:\n" + call(a, "sdlc-pr.yml", if_expr="github.event.action != 'closed'"))
+        jobs.append("  pr:\n" + call(a, "sdlc-pr.yml", if_expr="github.event.action != 'closed'",
+                                      extra_with=(f"      autofix_attempts: {a['autofix_attempts'] if s['build'] else 0}\n"
+                                                  f"      fix_model: {m['build']}\n")))
     if s["build"]:
         jobs.append("  story-link:\n" + call(a, "sdlc-story-link.yml", if_expr="github.event.action == 'closed'"))
     if s["design"] or s["build"]:
@@ -614,7 +623,7 @@ def plan_files(root, a, force=False):
     """{relpath: (new_content, kind)} with kind in managed | once | merged."""
     root = Path(root)
     out = {".sdlc/sdlc.json": (json.dumps({k: a[k] for k in ("sdlc_repo", "sdlc_ref", "base_branch", "maintain_cron", "stages",
-                                                             "auto_build", "workflows", "models", "budgets")},
+                                                             "auto_build", "autofix_attempts", "workflows", "models", "budgets")},
                                           indent=2) + "\n", "managed")}
     once = {
         ".sdlc/owners.yaml": render_owners(a), ".sdlc/jira.yaml": render_jira(a), ".sdlc/build.yaml": render_build(a),
