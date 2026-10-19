@@ -589,8 +589,53 @@ class JiraStoryTest(unittest.TestCase):
                   "Doing": ("indeterminate", [("Finish", "Done", "done")]), "Done": ("done", [])}
         jira = FakeJiraWorkflow(workflow=simple)
         self.assertIn("-> Doing", js.move(jira, "SCR-1", "in-progress"), "any in-progress category status works")
-        self.assertIn("no in-review transition", js.move(jira, "SCR-1", "in-review"))
+        self.assertIn('no transition to "In Review"', js.move(jira, "SCR-1", "in-review"))
+        self.assertIn('no transition to "Dev Completed"', js.move(jira, "SCR-1", "dev-complete"))
         self.assertEqual(jira.status, "Doing")
+
+    FULL = {
+        "To Do": ("new", [("Plan", "In Planning", "indeterminate"), ("Start", "In Progress", "indeterminate")]),
+        "In Planning": ("indeterminate", [("Start", "In Progress", "indeterminate")]),
+        "In Progress": ("indeterminate", [("Dev done", "Dev Completed", "indeterminate"), ("QA", "In QA", "indeterminate")]),
+        "Dev Completed": ("indeterminate", [("QA", "In QA", "indeterminate"), ("Rework", "In Progress", "indeterminate")]),
+        "In QA": ("indeterminate", [("Review", "In Review", "indeterminate"), ("Rework", "In Progress", "indeterminate")]),
+        "In Review": ("indeterminate", [("Rework", "In Progress", "indeterminate"), ("Close", "Done", "done")]),
+        "Done": ("done", [("Rework", "In Progress", "indeterminate")]),
+    }
+
+    def test_full_flow_through_every_stage(self):
+        jira = FakeJiraWorkflow(workflow=self.FULL)
+        for stage in ("planning", "in-progress", "dev-complete", "in-qa", "in-review"):
+            js.move(jira, "SCR-1", stage)
+        self.assertEqual(jira.status, "In Review")
+        self.assertIn("past", js.move(jira, "SCR-1", "in-qa"), "never backwards without --back")
+        self.assertEqual(js.move(jira, "SCR-1", "in-progress", back=True), "SCR-1: In Review -> In Progress")
+        self.assertEqual(js.move(jira, "SCR-1", "in-qa"), "SCR-1: In Progress -> In QA", "a re-push goes straight to QA")
+        self.assertIn("past", js.move(jira, "SCR-1", "dev-complete"), "the build's late update does not undo QA")
+        done = FakeJiraWorkflow("Done", workflow=self.FULL)
+        js.move(done, "SCR-1", "in-progress", back=True)
+        self.assertEqual(done.status, "Done", "never out of Done")
+
+    def test_status_names_come_from_jira_yaml(self):
+        names = js.status_names({"status_in_qa": "Testing", "status_dev_complete": ""})
+        self.assertEqual(names["in-qa"], "Testing")
+        self.assertEqual(names["dev-complete"], "Dev Completed")
+        custom = {"In Progress": ("indeterminate", [("Test", "Testing", "indeterminate")]),
+                  "Testing": ("indeterminate", [])}
+        jira = FakeJiraWorkflow("In Progress", workflow=custom)
+        self.assertEqual(js.move(jira, "SCR-1", "in-qa", names), "SCR-1: In Progress -> Testing")
+
+    def test_workflows_move_the_story_at_each_stage(self):
+        wf = {n: (ROOT / ".github" / "workflows" / n).read_text(encoding="utf-8")
+              for n in ("sdlc-build.yml", "sdlc-pr.yml", "sdlc-fix-findings.yml")}
+        for stage in ("planning", "in-progress", "dev-complete"):
+            self.assertIn(f"move {stage}", wf["sdlc-build.yml"])
+        self.assertNotIn("move in-review", wf["sdlc-build.yml"], "In Review waits for the PR's checks")
+        self.assertIn("move in-qa", wf["sdlc-pr.yml"])
+        jira_job = wf["sdlc-pr.yml"].split("\n  jira:\n", 1)[1].split("\n  autofix:\n", 1)[0]
+        self.assertIn("move in-review", jira_job)
+        self.assertIn("move in-progress --back", jira_job)
+        self.assertIn("move in-progress --back", wf["sdlc-fix-findings.yml"])
 
     def test_cli_without_jira_is_a_no_op(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith("JIRA_")}

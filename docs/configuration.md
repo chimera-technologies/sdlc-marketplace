@@ -47,6 +47,22 @@ not listed here.
 `space_key`, `epic_issue_type` (Epic), `story_issue_type` (Story) and
 `created_label` (`intent-created`: never `intent`, which starts the intake).
 
+The bot moves each story through these statuses (the names are the
+`status_<stage>` keys; each must exist in the space's Jira workflow, and a
+missing one is skipped with a note in the run log):
+
+| Key | Default | When |
+|---|---|---|
+| `status_planning` | In Planning | The plan PR opens (`sdlc-build`) |
+| `status_in_progress` | In Progress | The build starts; and **back** here when the review gate, traceability or the tests fail on the story PR, or the reviewer asks for `/sdlc fix` |
+| `status_dev_complete` | Dev Completed | The story PR opens with build PASS |
+| `status_in_qa` | In QA | The story PR's tests start (`sdlc-pr` e2e) |
+| `status_in_review` | In Review | The review gate, traceability and the tests all pass: waiting for the reviewer |
+| `status_done` | Done | The story PR merges (`sdlc-story-link`) |
+
+A story only moves forward, except back to In Progress as above; a Done
+story is never moved.
+
 ## `.sdlc/build.yaml` (Build and Test)
 
 | Key | Example | Meaning |

@@ -197,7 +197,13 @@ def render_jira(a):
             f"story_issue_type: {j.get('story_issue_type', 'Story')}\n"
             "# Label on Epics created with an intent. Deliberately NOT \"intent\": that\n"
             "# label starts the Jira Automation intake, which would draft a duplicate.\n"
-            f"created_label: {j.get('created_label', 'intent-created')}\n")
+            f"created_label: {j.get('created_label', 'intent-created')}\n"
+            "# The story's status at each stage: the bot moves it there when the stage\n"
+            "# starts (and back to In Progress when a check fails or a fix is asked for).\n"
+            "# Each status must exist in the space's Jira workflow; a missing one is skipped.\n"
+            + "".join(f"status_{k}: {j.get('status_' + k, v)}\n" for k, v in (
+                ("planning", "In Planning"), ("in_progress", "In Progress"), ("dev_complete", "Dev Completed"),
+                ("in_qa", "In QA"), ("in_review", "In Review"), ("done", "Done"))))
 
 
 def render_build(a):

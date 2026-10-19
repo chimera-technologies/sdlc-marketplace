@@ -470,6 +470,7 @@ jobs:
           URL: ${{ steps.pr.outputs.pull-request-url }}
           COUNT: ${{ steps.findings.outputs.count }}
         run: |
+          python3 "$SCRIPTS/jira_story.py" "$KEY" move planning
           python3 "$SCRIPTS/jira_story.py" "$KEY" comment "Plan ready for review: $URL. Merging it approves the plan and starts the build. Plan review: $COUNT edge case(s) and critical or high bug(s) to fix in this story."
           # Low bugs need no fix; they are recorded on the story.
           if [ -s "$RUNNER_TEMP/low.txt" ]; then
@@ -759,7 +760,7 @@ jobs:
         run: |
           if [ "$RESULT" = "PASS" ]; then
             python3 "$SCRIPTS/jira_story.py" "$KEY" comment "Story PR ready for review: $URL. Build PASS: acceptance tests green, verifier PASS. Merging it moves this story to Done."
-            python3 "$SCRIPTS/jira_story.py" "$KEY" move in-review
+            python3 "$SCRIPTS/jira_story.py" "$KEY" move dev-complete
           else
             python3 "$SCRIPTS/jira_story.py" "$KEY" comment "Build incomplete; draft story PR with the report: $URL. Someone needs to finish it (see the PR)."
           fi

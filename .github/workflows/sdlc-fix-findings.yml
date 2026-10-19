@@ -38,11 +38,11 @@ on:
         type: string
         default: main
       jira_base_url:
-        description: "vars.JIRA_BASE_URL (unused here; same inputs as the other callers)"
+        description: "vars.JIRA_BASE_URL, empty = no Jira (the story moves back to In Progress on a fix)"
         type: string
         default: ""
       jira_user_email:
-        description: "vars.JIRA_USER_EMAIL (unused here)"
+        description: "vars.JIRA_USER_EMAIL"
         type: string
         default: ""
       model:
@@ -210,6 +210,22 @@ jobs:
           shopt -s dotglob
           mv project/* .
           rmdir project
+
+      - name: Move the Jira story back to In Progress
+        if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix' && inputs.jira_base_url != ''
+        continue-on-error: true   # Jira never blocks the fix
+        env:
+          JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+          JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          HEAD: ${{ steps.cmd.outputs.head }}
+          FOUND: ${{ steps.cmd.outputs.found }}
+        run: |
+          plan=$(grep -lx "branch: $HEAD" plans/*.md 2>/dev/null | head -n1 || true)
+          key=$([ -n "$plan" ] && sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$plan" | head -n1 || true)
+          [ -n "$key" ] || { echo "No Jira story for $HEAD; skipping."; exit 0; }
+          python3 .sdlc-plugin/plugins/sdlc/skills/build-story/scripts/jira_story.py "$key" move in-progress --back
+          python3 .sdlc-plugin/plugins/sdlc/skills/build-story/scripts/jira_story.py "$key" comment "The reviewer asked for review finding(s) $FOUND to be fixed on PR #$PR; back In Progress while the bot fixes them."
 
       - uses: actions/setup-node@v4
         if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'
