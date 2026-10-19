@@ -222,7 +222,8 @@ jobs:
           FOUND: ${{ steps.cmd.outputs.found }}
         run: |
           plan=$(grep -lx "branch: $HEAD" plans/*.md 2>/dev/null | head -n1 || true)
-          key=$([ -n "$plan" ] && sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$plan" | head -n1 || true)
+          key=""
+          if [ -n "$plan" ]; then key=$(sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$plan" | head -n1); fi
           [ -n "$key" ] || { echo "No Jira story for $HEAD; skipping."; exit 0; }
           python3 .sdlc-plugin/plugins/sdlc/skills/build-story/scripts/jira_story.py "$key" move in-progress --back
           python3 .sdlc-plugin/plugins/sdlc/skills/build-story/scripts/jira_story.py "$key" comment "The reviewer asked for review finding(s) $FOUND to be fixed on PR #$PR; back In Progress while the bot fixes them."

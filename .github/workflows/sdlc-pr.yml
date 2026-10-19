@@ -463,7 +463,8 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
         run: |
           plan=$(grep -lx "branch: $HEAD_REF" plans/*.md 2>/dev/null | head -n1 || true)
-          key=$([ -n "$plan" ] && sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$plan" | head -n1 || true)
+          key=""
+          if [ -n "$plan" ]; then key=$(sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$plan" | head -n1); fi
           [ -n "$key" ] || { echo "No Jira story for $HEAD_REF; skipping."; exit 0; }
           python3 "$PLUGIN_DIR/skills/build-story/scripts/jira_story.py" "$key" move in-qa
 
@@ -562,7 +563,8 @@ jobs:
         run: |
           set -euo pipefail
           plan=$(grep -lx "branch: $HEAD_REF" plans/*.md 2>/dev/null | head -n1 || true)
-          key=$([ -n "$plan" ] && sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$plan" | head -n1 || true)
+          key=""
+          if [ -n "$plan" ]; then key=$(sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$plan" | head -n1); fi
           [ -n "$key" ] || { echo "No Jira story for $HEAD_REF; skipping."; exit 0; }
           JS="$PLUGIN_DIR/skills/build-story/scripts/jira_story.py"
           echo "review gate: $GATE, traceability: $TRACE, tests: $E2E"
@@ -574,7 +576,8 @@ jobs:
             [ "$TRACE" = failure ] && failed+=("traceability")
             [ "$E2E" = failure ] && failed+=("tests")
             python3 "$JS" "$key" move in-progress --back
-            python3 "$JS" "$key" comment "PR #$PR: $(IFS=,; echo "${failed[*]}" | sed 's/,/, /g') failed, so the story is back In Progress until it is fixed. Run: $RUN_URL"
+            what=$(printf '%s, ' "${failed[@]}")
+            python3 "$JS" "$key" comment "PR #$PR: ${what%, } failed, so the story is back In Progress until it is fixed. Run: $RUN_URL"
           else
             echo "Checks were cancelled or skipped; status unchanged."
           fi
