@@ -6,8 +6,108 @@ Plan, Design (spec and UI), Build, PR review, Test, Deploy and Maintain. Each
 stage commits an artifact the next stage reads; a human merge approves every
 step; hooks and deterministic checks enforce what must always hold.
 
-Adopt it in a project in one command, **`/sdlc:init`**, then follow
-[docs/adoption.md](docs/adoption.md).
+Adopt it in a project in one command, **`/sdlc:init`**: see
+[Set up a new project](#set-up-a-new-project) below, and
+[docs/adoption.md](docs/adoption.md) for the details.
+
+## Set up a new project
+
+### Once per GitHub organization
+
+1. **Let projects use the marketplace.** In this repo, go to Settings >
+   Actions > General > **Access**, and choose "Accessible from repositories
+   owned by" the organization. (For a client's organization, push a copy of
+   this repo with its tags into that organization, and use it as
+   `sdlc_repo`.)
+2. **Create the sdlc-bot GitHub App.** Go to the organization's Settings >
+   Developer settings > GitHub Apps. Turn the webhook off. Give it these
+   repository permissions: Contents RW, Pull requests RW, Issues RW,
+   Metadata R (and organization Members R for team reviewers). Generate a
+   private key and install the App on this repo.
+
+### In each project
+
+```bash
+# 1. Install the plugin (in the project folder)
+claude plugin marketplace add chimera-technologies/sdlc-marketplace
+claude plugin install sdlc@chimera-sdlc --scope project
+
+# 2. Set it up. In a Claude Code session in the project:
+/sdlc:init
+#    asks: owners, Jira, stages, stack (or "decide from the spec"), release tag;
+#    writes everything on an sdlc/init branch and opens a PR. Merge it.
+```
+
+3. **Install the sdlc-bot App** on the project repo.
+4. **Add the variables and secrets** in the project, under Settings >
+   Secrets and variables > Actions:
+
+   | Name | Kind | For |
+   |---|---|---|
+   | `SDLC_APP_ID` | variable | the sdlc-bot App |
+   | `SDLC_APP_PRIVATE_KEY` | secret | the sdlc-bot App |
+   | `ANTHROPIC_API_KEY` (recommended) or `CLAUDE_CODE_OAUTH_TOKEN` | secret | every AI step. Use a key from an Anthropic Console workspace that has a monthly spend limit |
+   | `JIRA_BASE_URL`, `JIRA_USER_EMAIL` | variables | Jira (optional) |
+   | `JIRA_API_TOKEN` | secret | Jira (optional) |
+   | `XRAY_CLIENT_ID`, `XRAY_CLIENT_SECRET` | secrets | Xray test cases and results (optional) |
+
+5. **Branch protection** on `main`: require the checks that init lists
+   (`pr / review-gate`, `pr / traceability`, `pr / e2e`, and the
+   `*-check / validate` checks of the enabled stages) once each has run.
+6. **Jira** (optional):
+   - Add the statuses In Planning, Dev Completed and In QA to the space's
+     workflow. The bot moves each story through them.
+   - With the Plan stage on, add a Jira Automation rule for the `intent`
+     label (init prints the exact rule).
+7. **Spend limits:** set `budgets` in `.sdlc/sdlc.json` (per run and per
+   month). See [AI spend limits](docs/configuration.md#ai-spend-limits).
+
+Then start: merge a requirement document into `requirements/`, run
+`/sdlc:write-intent`, or label a Jira ticket `intent`. Each stage after that
+opens its own PR.
+
+## An existing project, or only Build
+
+Init only adds `.sdlc/`, the `sdlc-*.yml` callers, `.claude/settings.json`
+and a block in `CLAUDE.md`. Your code and your own CI stay as they are.
+Before adopting:
+- make the existing tests pass in CI with `test_command`;
+- use `{files}` in `check_command` (for example `npx eslint {files}`), so
+  older lint problems don't block new work;
+- record the codebase's conventions in `PATTERNS.md`.
+
+**Only Build**, on an existing backlog: turn the other stages off in
+`.sdlc/sdlc.json` (or when init asks), then regenerate with
+`/sdlc:init upgrade=<current tag>`:
+
+```json
+"stages": {"plan": false, "design": false, "ui_design": false,
+           "build": true, "pr_review": true, "test": true,
+           "deploy": false, "maintain": false},
+"auto_build": false
+```
+
+Then build any Jira ticket with **`/sdlc:build-story <KEY>`** (ticket mode).
+It takes the ticket's acceptance criteria (an "Acceptance criteria" list,
+Given/When/Then, or `AC-1:` lines) and writes them to
+`tickets/<key>.md`. If the ticket has none, Claude proposes criteria for
+the developer to approve. Then it plans, writes the tests first, builds,
+verifies and opens the PR. The PR gets the full review gate, tests, autofix,
+Xray and Jira statuses. Small changes need no ticket: use `/sdlc:fix`.
+
+## Everyday commands
+
+| Where | Command | What it does |
+|---|---|---|
+| Claude Code | `/sdlc:write-intent` | Turn a requirement into an intent (Plan) |
+| Claude Code | `/sdlc:build-story <KEY>` | Build one story or Jira ticket test-first, verified, as a PR |
+| Claude Code | `/sdlc:fix` | A small change without intent, spec or plan (the fix lane) |
+| Claude Code | `/sdlc:release` | Cut a release (Deploy) |
+| Claude Code | `/sdlc:init upgrade=vX.Y.Z` | Move the project to a new plugin release |
+| PR comment | `/sdlc revise <request>` | Revise an intent, spec or plan PR on its branch |
+| PR comment | `/sdlc fix <n> [how]`, `/sdlc fix all` | Fix review findings on a story PR |
+| PR comment | `/sdlc dismiss <n> <reason>` | Accept a finding; the next review won't report it again |
+| Actions | **SDLC push** > Run workflow > `rerun` | Re-run one stage for one file (for example `spec-to-stories`) |
 
 ## Stages
 
@@ -16,9 +116,9 @@ Adopt it in a project in one command, **`/sdlc:init`**, then follow
 | Plan | merge a requirement document into `requirements/` (or `/sdlc:write-intent`, or label a Jira ticket `intent`) | `intent/<slug>.md` (+ a Jira Epic) | the owner merging the intent PR |
 | Design | automatic when an intent merges | `specs/<slug>.md`: requirements, **stack decision**, stories; pre-screened by an adversarial reviewer | owner (+ tech lead for high risk); stories then appear in Jira |
 | UI design | automatic with the spec; `/sdlc:design-ui from=mockups` to refine in Figma | HTML mockups and a PNG of each screen in `designs/<slug>/` | owner merging the spec PR (or a design PR) |
-| Build | automatic after each merge (or `/sdlc:build-story <KEY>`) | per story: a plan PR, then CI builds it test-first with an independent verifier and opens the story PR | owner merging the plan PR |
-| PR review | opening the story PR | conformance review gate + Anthropic `code-review` (+ your own reviewers) | the gate, then the owner |
-| Test | after the review gate | your project's tests, on your toolchain; after the merge, a test report per story in `test-reports/` | green checks |
+| Build | automatic after each merge (or `/sdlc:build-story <KEY>`, also for a Jira ticket without a spec) | per story: a plan PR, then CI builds it test-first with an independent verifier and opens the story PR | owner merging the plan PR |
+| PR review | opening the story PR | conformance review gate + Anthropic `code-review` (+ your own reviewers); each high or medium finding as a PR comment the reviewer answers with `/sdlc fix` or `/sdlc dismiss` | the gate, then the owner |
+| Test | after the review gate | your project's tests, on your toolchain; failing tests fixed automatically (autofix); results and screenshots in Xray; after the merge, a test report per story in `test-reports/` | green checks |
 | Deploy | `/sdlc:release` | release record, tag, staging, production | the production environment's reviewers |
 | Maintain | scheduled checks | breaches become intents | the service owner |
 
@@ -103,7 +203,9 @@ docs/            adoption, stages, configuration, architecture, POC examples
   release with that CHANGELOG entry, so the release is usable at once.
   Projects upgrade with `/sdlc:init upgrade=v<version>`.
 
-The worked POC (a workout app taken from a requirement document through
-every stage) is in [docs/examples/poc/](docs/examples/poc/) and the
-`bala-chimera/workout-plan-poc` repo. The original architecture is
+The worked POCs:
+- `chimera-technologies/skills-dashboard`, a skills dashboard taken from a
+  requirement document through intent, spec, UI design, plans and stories,
+  with Jira, Xray and the PR review loop;
+- the first one, a workout app, in [docs/examples/poc/](docs/examples/poc/). The original architecture is
 [docs/architecture.html](docs/architecture.html).
