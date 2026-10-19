@@ -4,6 +4,23 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.24.0 (2026-10-19)
+
+- **Jira stories list their acceptance criteria as AC-1..n.** The story
+  description now has an "Acceptance criteria" heading with numbered
+  criteria, so they match the plan, the test names and the Xray Tests
+  ("S5 AC-1: ...").
+- **A changed spec updates its Jira stories.** `spec-to-stories` used to
+  skip a story that already existed; it now brings its description up to
+  date, down to the "From spec:" line. Text people add below that line is
+  kept, and a description without that line is left alone.
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.24.0` and merge the PR. To renumber the stories
+already in Jira: Actions, **SDLC push**, Run workflow, `rerun:
+spec-to-stories`, `file: specs/<slug>.md` (once per spec).
+
 ## v0.23.0 (2026-10-16)
 
 - **Review findings are PR comments the reviewer answers.** The review gate
