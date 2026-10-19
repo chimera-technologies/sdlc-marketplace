@@ -101,7 +101,7 @@ class FindingsWiringTest(unittest.TestCase):
         deny = wf.split('SDLC_WRITE_DENY: "', 1)[1].split('"', 1)[0]
         self.assertNotIn("designs/", deny, "the reviewer may ask for the design to change")
         self.assertIn("plans/", deny)
-        self.assertIn("protected=(.github .sdlc .claude intent specs plans releases runbooks CLAUDE.md REVIEW.md)", wf)
+        self.assertIn("protected=(.github .sdlc .claude intent specs tickets plans releases runbooks CLAUDE.md REVIEW.md)", wf)
         self.assertIn("/sdlc:build-story mode=fix-findings", wf)
         self.assertIn("--allow-empty", wf, "a dismissed high finding re-runs the gate")
 

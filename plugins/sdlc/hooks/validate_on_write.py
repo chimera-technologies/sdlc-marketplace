@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PostToolUse hook: validate intent/*.md, specs/*.md and plans/*.md every
+"""PostToolUse hook: validate intent/*.md, specs/*.md, plans/*.md and tickets/*.md every
 time Claude writes one.
 
 The skills already tell Claude to run their validator; this hook makes it
@@ -18,6 +18,7 @@ VALIDATORS = {
     "intent": SKILLS / "write-intent" / "scripts" / "validate_intent.py",
     "specs": SKILLS / "write-spec" / "scripts" / "validate_spec.py",
     "plans": SKILLS / "build-story" / "scripts" / "validate_plan.py",
+    "tickets": SKILLS / "build-story" / "scripts" / "ticket_brief.py",
 }
 
 
@@ -46,6 +47,8 @@ def main():
     owners = project / ".sdlc" / "owners.yaml"
     if rel.parts[0] == "plans":
         cmd += ["--root", str(project)]
+    elif rel.parts[0] == "tickets":
+        cmd += ["validate"]
     elif owners.is_file():
         cmd += ["--owners", str(owners)]
     cmd.append(str(path))

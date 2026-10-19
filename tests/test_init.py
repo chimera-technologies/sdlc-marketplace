@@ -346,6 +346,19 @@ class InitTest(unittest.TestCase):
         self.assertNotIn(", build,", push)
         self.assertIn("`/sdlc:build-story <KEY>` | `plans/", self.read("CLAUDE.md"))
 
+    def test_build_only_project(self):
+        a, _ = ip.normalize({**ANSWERS, "stages": {"plan": False, "design": False, "ui_design": False, "deploy": False,
+                                                   "maintain": False}})
+        self.assertEqual(ip.required_checks(a["stages"]), ["pr / review-gate", "pr / traceability", "pr / e2e"])
+        steps = ip.checklist(a)
+        self.assertNotIn("intent-check", steps)
+        self.assertNotIn("Jira Automation", steps, "no intake without the Plan stage")
+        self.assertIn("ticket mode", steps)
+        callers = ip.render_callers(a)
+        self.assertNotIn("sdlc-intent-to-spec.yml", "".join(callers.values()))
+        full, _ = ip.normalize(ANSWERS)
+        self.assertIn("intent-check / validate", ip.checklist(full))
+
     def test_jira_off(self):
         self.run_init({**ANSWERS, "jira": {"enabled": False}})
         self.assertIn("enabled: false", self.read(".sdlc/jira.yaml"))

@@ -491,7 +491,7 @@ jobs:
       SDLC_HEADLESS: "1"
       # Code may go anywhere the stack needs it; the SDLC's own files may not change.
       SDLC_WRITE_ALLOW: "*"
-      SDLC_WRITE_DENY: ".github/,.sdlc/,.claude/,intent/,specs/,designs/,plans/,releases/,runbooks/,CLAUDE.md,REVIEW.md,.sdlc-plugin/"
+      SDLC_WRITE_DENY: ".github/,.sdlc/,.claude/,intent/,specs/,tickets/,designs/,plans/,releases/,runbooks/,CLAUDE.md,REVIEW.md,.sdlc-plugin/"
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ID: ${{ matrix.item.id }}
@@ -639,7 +639,7 @@ jobs:
         run: |
           set -euo pipefail
           # The build may not change the SDLC's own files: put them back and say so.
-          protected=(.github .sdlc .claude intent specs designs plans releases runbooks CLAUDE.md REVIEW.md)
+          protected=(.github .sdlc .claude intent specs tickets designs plans releases runbooks CLAUDE.md REVIEW.md)
           touched=$(git status --porcelain -- "${protected[@]}" | cut -c4- || true)
           if [ -n "$touched" ]; then
             echo "::warning::the build changed protected files; reverted: $touched"
