@@ -454,6 +454,20 @@ jobs:
         if: steps.stack.outputs.test_command == ''
         run: echo "::notice::Tests skipped. No test_command in .sdlc/build.yaml yet, or none of its code_paths exist (the first story creates them)."
 
+      - name: Move the Jira story to In QA
+        if: needs.config.outputs.story == 'true' && inputs.jira_base_url != ''
+        continue-on-error: true   # Jira never blocks the PR
+        env:
+          JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+          JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          plan=$(grep -lx "branch: $HEAD_REF" plans/*.md 2>/dev/null | head -n1 || true)
+          key=""
+          if [ -n "$plan" ]; then key=$(sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$plan" | head -n1); fi
+          [ -n "$key" ] || { echo "No Jira story for $HEAD_REF; skipping."; exit 0; }
+          python3 "$PLUGIN_DIR/skills/build-story/scripts/jira_story.py" "$key" move in-qa
+
       - name: Run the project's static checks (check_command)
         if: steps.stack.outputs.check_command != '' && steps.stack.outputs.test_command != ''
         env:
@@ -502,6 +516,71 @@ jobs:
           path: ${{ steps.stack.outputs.report_path }}
           if-no-files-found: ignore
           retention-days: 30
+
+  jira:
+    needs: [config, review-gate, traceability, e2e]
+    # Story PRs: the Jira story goes to In Review when the review gate, traceability and the
+    # tests pass, and back to In Progress when one of them fails (autofix or a person fixes it).
+    if: always() && needs.config.outputs.story == 'true' && inputs.jira_base_url != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true   # Jira never blocks the PR
+    steps:
+      - name: Scope the App token to this repo and the plugin repo
+        id: app-repos
+        env:
+          SDLC_REPO: ${{ inputs.sdlc_repo }}
+        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint short-lived GitHub App token (plugin read)
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app_id }}
+          private-key: ${{ secrets.SDLC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.app-repos.outputs.names }}
+
+      - uses: actions/checkout@v4
+
+      - name: Check out pinned sdlc plugin
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SDLC_PLUGIN_REPO }}
+          ref: ${{ env.SDLC_PLUGIN_REF }}
+          token: ${{ steps.app.outputs.token }}
+          path: .sdlc-plugin
+
+      - name: Move the Jira story (In Review, or back to In Progress)
+        env:
+          JIRA_BASE_URL: ${{ inputs.jira_base_url }}
+          JIRA_USER_EMAIL: ${{ inputs.jira_user_email }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          GATE: ${{ needs.review-gate.result }}
+          TRACE: ${{ needs.traceability.result }}
+          E2E: ${{ needs.e2e.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          plan=$(grep -lx "branch: $HEAD_REF" plans/*.md 2>/dev/null | head -n1 || true)
+          key=""
+          if [ -n "$plan" ]; then key=$(sed -n 's/^jira:[[:space:]]*\([A-Z][A-Z0-9]*-[0-9]*\)[[:space:]]*$/\1/p' "$plan" | head -n1); fi
+          [ -n "$key" ] || { echo "No Jira story for $HEAD_REF; skipping."; exit 0; }
+          JS="$PLUGIN_DIR/skills/build-story/scripts/jira_story.py"
+          echo "review gate: $GATE, traceability: $TRACE, tests: $E2E"
+          if [ "$GATE" = success ] && [ "$TRACE" = success ] && [ "$E2E" = success ]; then
+            python3 "$JS" "$key" move in-review
+          elif [ "$GATE" = failure ] || [ "$TRACE" = failure ] || [ "$E2E" = failure ]; then
+            failed=()
+            [ "$GATE" = failure ] && failed+=("review gate")
+            [ "$TRACE" = failure ] && failed+=("traceability")
+            [ "$E2E" = failure ] && failed+=("tests")
+            python3 "$JS" "$key" move in-progress --back
+            what=$(printf '%s, ' "${failed[@]}")
+            python3 "$JS" "$key" comment "PR #$PR: ${what%, } failed, so the story is back In Progress until it is fixed. Run: $RUN_URL"
+          else
+            echo "Checks were cancelled or skipped; status unchanged."
+          fi
 
   autofix:
     needs: [config, traceability, e2e]

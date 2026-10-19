@@ -16,12 +16,16 @@ environment, and either the spec's record_id (the intent's Jira record) or
   labelled spec-<slug> (and created_label), and the stories go under it. A
   re-run finds that Epic by its label instead of creating another.
 - Idempotent: each story carries the label spec-<slug>-<sN>; a story whose
-  label already exists is skipped, so re-runs and spec revisions only add
-  new stories.
+  label already exists is not created again. Its description is brought up
+  to date instead (a changed spec reaches Jira), down to the "From spec:"
+  line; what people add below that line is kept. A description without that
+  line is left alone.
+- The description numbers the acceptance criteria AC-1..n, as the plan, the
+  tests and the Xray Tests name them.
 - If the record is an Epic, stories are created under it (parent). If it
   is any other issue type, stories are created in the same space and
   linked to it with "Relates".
-Prints a JSON summary: {"record": ..., "epic_created": ..., "created": [...], "existing": [...]}.
+Prints a JSON summary: {"record": ..., "epic_created": ..., "created": [...], "existing": [...], "updated": [...]}.
 """
 import argparse
 import base64
@@ -41,6 +45,34 @@ vs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(vs)
 
 
+def footer(slug, story_id):
+    return f"From spec: specs/{slug}.md ({story_id})"
+
+
+def description(story_body, slug, story_id):
+    """Jira (wiki markup) description: the story text, its criteria numbered AC-1..n as the
+    plan and the tests name them, then the From spec line."""
+    text, sep, rest = story_body.partition("Acceptance criteria:")
+    parts = [text.strip()]
+    if sep:
+        criteria = [l[2:].strip() for l in rest.splitlines() if l.startswith("- ")]
+        parts.append("*Acceptance criteria*\n" + "\n".join(f"* *AC-{k}:* {c}" for k, c in enumerate(criteria, 1)))
+    parts.append(footer(slug, story_id))
+    return "\n\n".join(p for p in parts if p)
+
+
+def refreshed(current, new, slug, story_id):
+    """The new description, keeping what people added below the From spec line; None if
+    nothing changes or the description is no longer the one this script wrote."""
+    current = (current or "").replace("\r\n", "\n")
+    mark = footer(slug, story_id)
+    if mark not in current:
+        return None
+    kept = current.split(mark, 1)[1]
+    out = new + kept
+    return None if out == current else out
+
+
 def story_payloads(spec_path, issue_type="Story"):
     """Story fields for each '### S<n>:' entry in the spec (no Jira calls)."""
     text = Path(spec_path).read_text(encoding="utf-8")
@@ -53,8 +85,9 @@ def story_payloads(spec_path, issue_type="Story"):
         out.append({
             "id": s["id"],
             "label": label,
+            "slug": slug,
             "summary": f"{s['id']}: {s['title']}"[:255],
-            "description": f"{s['body']}\n\nFrom spec: specs/{slug}.md ({s['id']})",
+            "description": description(s["body"], slug, s["id"]),
             "labels": ["from-spec", label],
             "issue_type": issue_type,
         })
@@ -144,11 +177,16 @@ def create_stories(spec_path, jira, issue_type="Story", jira_cfg=None):
         rec = jira.issue(record)
         project = rec["fields"]["project"]["key"]
         is_epic = rec["fields"]["issuetype"]["name"].lower() == "epic"
-    created, existing = [], []
+    created, existing, updated = [], [], []
     for s in stories:
         key = jira.find_by_label(s["label"])
         if key:
             existing.append({"id": s["id"], "key": key})
+            current = jira.call("GET", f"/rest/api/2/issue/{key}?fields=description").get("fields", {}).get("description")
+            new = refreshed(current, s["description"], s["slug"], s["id"])
+            if new is not None:
+                jira.call("PUT", f"/rest/api/2/issue/{key}", {"fields": {"description": new}})
+                updated.append({"id": s["id"], "key": key})
             continue
         fields = {
             "project": {"key": project},
@@ -164,7 +202,8 @@ def create_stories(spec_path, jira, issue_type="Story", jira_cfg=None):
             jira.call("POST", "/rest/api/2/issueLink", {
                 "type": {"name": "Relates"}, "inwardIssue": {"key": new["key"]}, "outwardIssue": {"key": record}})
         created.append({"id": s["id"], "key": new["key"], "summary": s["summary"]})
-    return {"record": record, "epic_created": epic_created, "parent": is_epic, "created": created, "existing": existing}
+    return {"record": record, "epic_created": epic_created, "parent": is_epic, "created": created,
+            "existing": existing, "updated": updated}
 
 
 def main():

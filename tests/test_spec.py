@@ -130,17 +130,23 @@ class ValidateSpecTest(RepoCase):
 class FakeJira:
     """Records calls; answers like Jira for the endpoints spec_stories uses."""
 
-    def __init__(self, record_type="Epic", existing=()):
+    def __init__(self, record_type="Epic", existing=(), descriptions=None):
         self.record_type, self.existing, self.calls, self.n = record_type, set(existing), [], 100
+        self.descriptions = descriptions or {}   # label -> current description of the existing story
 
     def issue(self, key):
         return {"fields": {"project": {"key": key.split("-")[0]}, "issuetype": {"name": self.record_type}}}
 
     def find_by_label(self, label):
-        return "CLM-1" if label in self.existing else None
+        if label in self.existing:
+            self.last = label
+            return "CLM-1"
+        return None
 
     def call(self, method, path, body=None):
         self.calls.append((method, path, body))
+        if method == "GET" and "fields=description" in path:
+            return {"fields": {"description": self.descriptions.get(self.last)}}
         if path.endswith("/issue"):
             self.n += 1
             return {"key": f"CLM-{self.n}"}
@@ -154,6 +160,41 @@ class SpecStoriesTest(unittest.TestCase):
         self.assertEqual(stories[0]["summary"], "S1: Customer claim status endpoint in claims-core")
         self.assertEqual(stories[0]["labels"], ["from-spec", "spec-claims-status-self-service-s1"])
         self.assertIn("From spec: specs/claims-status-self-service.md (S1)", stories[0]["description"])
+
+    def test_description_numbers_the_criteria(self):
+        _, stories = ss.story_payloads(SPEC)
+        _, body = vs.vi.parse_frontmatter(SPEC.read_text(encoding="utf-8"))
+        s3 = next(s for s in vs.parse_stories(body) if s["id"] == "S3")
+        criteria = [l[2:].strip() for l in s3["body"].split("Acceptance criteria:", 1)[1].splitlines() if l.startswith("- ")]
+        desc = stories[2]["description"]
+        self.assertIn("*Acceptance criteria*", desc)
+        self.assertNotIn("Acceptance criteria:", desc)
+        for k, c in enumerate(criteria, 1):
+            self.assertIn(f"* *AC-{k}:* {c}", desc)
+        self.assertTrue(desc.endswith("From spec: specs/claims-status-self-service.md (S3)"))
+        self.assertEqual(ss.description("Just text.", "x", "S1"), "Just text.\n\nFrom spec: specs/x.md (S1)")
+
+    def test_existing_story_is_brought_up_to_date(self):
+        label = "spec-claims-status-self-service-s1"
+        old = "Old text.\n- a\n\nFrom spec: specs/claims-status-self-service.md (S1)\n\nh4. Notes\nAdded by hand."
+        jira = FakeJira("Epic", existing={label}, descriptions={label: old})
+        result = ss.create_stories(SPEC, jira)
+        puts = [(p, b) for m, p, b in jira.calls if m == "PUT"]
+        self.assertEqual([p for p, _ in puts], ["/rest/api/2/issue/CLM-1"])
+        new = puts[0][1]["fields"]["description"]
+        _, stories = ss.story_payloads(SPEC)
+        self.assertTrue(new.startswith(stories[0]["description"]))
+        self.assertTrue(new.endswith("h4. Notes\nAdded by hand."), "what people added below the From spec line stays")
+        self.assertEqual(result["updated"], [{"id": "S1", "key": "CLM-1"}])
+
+    def test_up_to_date_or_foreign_descriptions_are_left_alone(self):
+        label = "spec-claims-status-self-service-s1"
+        _, stories = ss.story_payloads(SPEC)
+        for current in (stories[0]["description"], "Written by a person, no From spec line.", None):
+            jira = FakeJira("Epic", existing={label}, descriptions={label: current})
+            result = ss.create_stories(SPEC, jira)
+            self.assertFalse(any(m == "PUT" for m, _, _ in jira.calls), current)
+            self.assertEqual(result["updated"], [])
 
     def test_creates_under_epic(self):
         jira = FakeJira("Epic")
