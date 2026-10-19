@@ -171,7 +171,7 @@ class AutofixTest(unittest.TestCase):
         self.assertIn("steps.repro.outputs.failed != 'true'", job, "a failure that does not happen again is called flaky")
         self.assertIn("/sdlc:build-story mode=fix-tests", job)
         self.assertIn('git push -q origin "HEAD:$HEAD_REF"', job)
-        self.assertIn("protected=(.github .sdlc .claude intent specs designs plans", job, "SDLC files are put back")
+        self.assertIn("protected=(.github .sdlc .claude intent specs tickets designs plans", job, "SDLC files are put back")
         self.assertIn("<!-- sdlc-autofix-stopped -->", job)
 
     def test_the_skill_never_weakens_tests(self):

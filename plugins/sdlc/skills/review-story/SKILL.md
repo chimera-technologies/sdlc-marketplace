@@ -26,7 +26,8 @@ Arguments: `$ARGUMENTS` (`base` defaults to `origin/main`).
 2. The story: the branch is `story/<jira-key>-<name>` (or
    `story/<spec-slug>-s<n>` without Jira); the plan is the file in `plans/`
    whose `branch:` is this branch. From the plan, read its spec
-   (`specs/<slug>.md`), the story's acceptance criteria and requirements.
+   (`specs/<slug>.md`, or a ticket brief `tickets/<key>.md` for a ticket
+   built without a spec), the story's acceptance criteria and requirements.
    **A fix PR** (branch `fix/<name>`, the fix lane) has no plan or spec:
    read the PR's description for the problem, and skip the plan, spec and
    design checks below. Check instead that the change is small and does

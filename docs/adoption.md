@@ -66,6 +66,35 @@ on the marketplace repo (or someone who has it).
   starts the next story. To build by hand instead, set `"auto_build": false`
   in `.sdlc/sdlc.json`, re-run init, and use `/sdlc:build-story <KEY>`.
 
+## An existing project, or only Build
+
+Init adds only `.sdlc/`, the `sdlc-*.yml` callers, `.claude/settings.json`
+and a block in `CLAUDE.md`; the code and its own CI stay as they are. Before
+adopting, make the existing suite pass in CI with `test_command`, and use
+`{files}` in `check_command` (for example `npx eslint {files}`) so older
+lint and type problems do not block new work. The first story's preflight
+indexes the codebase with Graphify; record the codebase's conventions in
+`PATTERNS.md` so builds follow them.
+
+To adopt **only Build** on an existing backlog, turn the other stages off
+when init asks (or in the answers):
+
+```json
+"stages": {"plan": false, "design": false, "ui_design": false,
+           "build": true, "pr_review": true, "test": true,
+           "deploy": false, "maintain": false}
+```
+
+Then build any Jira ticket with `/sdlc:build-story <KEY>` (**ticket mode**):
+its acceptance criteria (an "Acceptance criteria" list, Given/When/Then, or
+`AC-1:` lines) become a ticket brief, `tickets/<key>.md`, a one-story spec
+the plan, the review gate, traceability, Xray and the test report use. A
+ticket without criteria gets criteria proposed and approved by the person
+first. The brief is committed with the story; nothing watches `tickets/`,
+so no Jira stories, stack PR or automatic build come from it. The story PR
+gets the full PR review, tests, autofix and Jira statuses. Small changes
+need no ticket at all: `/sdlc:fix` (the fix lane).
+
 ## Upgrading
 
 `/sdlc:init upgrade=vX.Y.Z` (or `init_project.py --upgrade vX.Y.Z`) moves

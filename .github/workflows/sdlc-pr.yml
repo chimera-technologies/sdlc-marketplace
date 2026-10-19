@@ -599,7 +599,7 @@ jobs:
       SDLC_HEADLESS: "1"
       # Code may go anywhere the stack needs it; the SDLC's own files may not change.
       SDLC_WRITE_ALLOW: "*"
-      SDLC_WRITE_DENY: ".github/,.sdlc/,.claude/,intent/,specs/,designs/,plans/,releases/,runbooks/,CLAUDE.md,REVIEW.md,.sdlc-plugin/"
+      SDLC_WRITE_DENY: ".github/,.sdlc/,.claude/,intent/,specs/,tickets/,designs/,plans/,releases/,runbooks/,CLAUDE.md,REVIEW.md,.sdlc-plugin/"
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       SCRIPTS: .sdlc-plugin/plugins/sdlc/skills/build-story/scripts
@@ -792,7 +792,7 @@ jobs:
               || echo "::warning title=Reply failed::Could not reply on #$PR: ${out:0:300}"
           }
           # The fix may not change the SDLC's own files: put them back.
-          protected=(.github .sdlc .claude intent specs designs plans releases runbooks CLAUDE.md REVIEW.md)
+          protected=(.github .sdlc .claude intent specs tickets designs plans releases runbooks CLAUDE.md REVIEW.md)
           git ls-files -z -m -d -- "${protected[@]}" | xargs -0 -r git checkout HEAD --
           git clean -fdq -- "${protected[@]}"
           printf '%s\n' node_modules/ .venv/ venv/ __pycache__/ .pytest_cache/ target/ bin/ obj/ dist/ build/ \

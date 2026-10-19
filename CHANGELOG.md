@@ -4,6 +4,30 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.25.0 (2026-10-19)
+
+- **Build an existing Jira ticket without a spec (ticket mode).**
+  `/sdlc:build-story <KEY>` on a ticket with no `spec-<slug>-s<n>` label
+  turns its acceptance criteria into a ticket brief, `tickets/<key>.md` (new
+  `ticket_brief.py`: reads an "Acceptance criteria" list in Markdown or Jira
+  wiki, Given/When/Then, or `AC-1:` lines). A ticket without criteria gets
+  criteria proposed and approved by the person (`criteria: proposed`). The
+  brief is a one-story spec: the plan (`spec: tickets/<key>.md`), the
+  review gate, traceability, Xray and the test report use it unchanged.
+  Nothing watches `tickets/`, so it creates no Jira stories, stack PR or
+  automatic build. A team can now adopt only Build on its backlog.
+- `tickets/*.md` is validated on write (hook) and protected like `specs/`
+  from automatic fixes.
+- Init: the branch-protection checklist names only the checks of the
+  enabled stages, the Jira intake step appears only with the Plan stage, and
+  a build-only project's `CLAUDE.md` describes ticket mode.
+- build-story (interactive) moves the story to Dev Completed, not In
+  Review, when its PR opens, matching v0.24.0.
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.25.0` and merge the PR. Nothing else to do.
+
 ## v0.24.0 (2026-10-19)
 
 - **Jira stories list their acceptance criteria as AC-1..n.** The story

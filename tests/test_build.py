@@ -28,6 +28,7 @@ bg = load("build_guard", PLUGIN / "hooks" / "build_guard.py")
 bp = load("build_preflight", PLUGIN / "skills" / "build-story" / "scripts" / "build_preflight.py")
 ns = load("next_story", PLUGIN / "skills" / "build-story" / "scripts" / "next_story.py")
 js = load("jira_story", PLUGIN / "skills" / "build-story" / "scripts" / "jira_story.py")
+tb = load("ticket_brief", PLUGIN / "skills" / "build-story" / "scripts" / "ticket_brief.py")
 RPR = PLUGIN / "skills" / "review-plan" / "scripts" / "render_plan_review.py"
 rpr = load("render_plan_review", RPR)
 TR = PLUGIN / "skills" / "build-story" / "scripts" / "test_report.py"
@@ -141,6 +142,90 @@ class ValidatePlanTest(Repo):
     def test_check_tests_does_not_match_longer_ids(self):
         (self.root / "tests" / "api" / "t.py").write_text('test("S1 AC-10: x")\ntest("S1 AC-20: y")\ntest("S1 AC-30: z")', encoding="utf-8")
         self.assertEqual(vp.test_names_found(self.root, ["S1 AC-1", "S1 AC-2", "S1 AC-3"]), set())
+
+
+class TicketBriefTest(Repo):
+    """build-story ticket mode: a Jira ticket without a spec, as tickets/<key>.md."""
+
+    STYLES = {
+        "markdown": ("As a user I want X.\n\n## Acceptance criteria\n- Shows the list\n- Sorted by date\n  even when empty\n\n## Notes\nnone",
+                     ["Shows the list", "Sorted by date even when empty"], "## Notes"),
+        "jira wiki": ("Intro.\n\nh3. Acceptance Criteria\n* *AC-1:* first\n* *AC-2:* second\n\nh3. Out of scope\nstuff",
+                      ["first", "second"], "h3. Out of scope"),
+        "wiki numbered": ("Intro\n\n*Acceptance criteria:*\n# one\n# two", ["one", "two"], "Intro"),
+        "gherkin": ("Story\n\nAcceptance Criteria\nGiven a user\nWhen they log in\nThen they see home\n\n"
+                    "Given a bad password\nWhen they log in\nThen an error shows",
+                    ["Given a user When they log in Then they see home",
+                     "Given a bad password When they log in Then an error shows"], "Story"),
+        "AC lines": ("Blah\nAC1: works offline\nAC-2 - syncs later", ["works offline", "syncs later"], "Blah"),
+        "spec story": ("Headline numbers.\n\n*Acceptance criteria*\n* *AC-1:* Match.\n* *AC-2:* Ordered.\n\nFrom spec: specs/x.md (S5)",
+                       ["Match.", "Ordered."], "From spec:"),
+    }
+
+    def test_criteria_from_common_ticket_styles(self):
+        for name, (desc, want, kept) in self.STYLES.items():
+            crit, context = tb.extract(desc)
+            self.assertEqual(crit, want, name)
+            self.assertIn(kept, context, f"{name}: the rest of the description stays as context")
+        self.assertEqual(tb.extract("Just a description.")[0], [])
+
+    def brief(self, desc, criteria=None):
+        text = tb.render("CLM-483", "Customer claim status: endpoint", desc, criteria, created="2026-10-19")
+        if text is None:
+            return None
+        p = self.root / "tickets" / "clm-483.md"
+        p.parent.mkdir(exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    CRITERIA = ("Returns only claims owned by the given customer (REQ-1).", "Returns status codes, not internal states.",
+                "Access is logged with customer ID and time, without claim content.")
+
+    def test_a_plan_builds_from_the_brief(self):
+        p = self.brief("Context.\n\nAcceptance criteria:\n" + "\n".join(f"- {c}" for c in self.CRITERIA))
+        self.assertEqual(tb.validate(p), [])
+        self.assertIn('title: "Customer claim status: endpoint"', p.read_text(encoding="utf-8"), "': ' is quoted")
+        plan = (self.plan_text.replace("id: claims-status-self-service-s1", "id: clm-483-s1")
+                .replace("spec: specs/claims-status-self-service.md", "spec: tickets/clm-483.md"))
+        _, errors, _ = vp.validate(self.plan(plan, name="clm-483-s1"), self.root)
+        self.assertEqual(errors, [])
+        _, errors, _ = vp.validate(self.plan(plan.replace("| AC-3 ", "| AC-9 "), name="clm-483-s1"), self.root)
+        self.assertTrue(errors, "the plan still maps every criterion of the ticket")
+
+    def test_no_criteria_needs_approved_ones(self):
+        self.assertIsNone(self.brief("Just make it faster."))
+        p = self.brief("Just make it faster.", ["Loads in under 2 s", "No change to results"])
+        text = p.read_text(encoding="utf-8")
+        self.assertIn("criteria: proposed", text)
+        self.assertIn("- Loads in under 2 s", text)
+        self.assertEqual(tb.validate(p), [])
+
+    def test_validate_rejects_a_bad_brief(self):
+        p = self.brief("x\n\nAcceptance criteria:\n- one")
+        p.write_text(p.read_text(encoding="utf-8").replace("### S1:", "### S2:"), encoding="utf-8")
+        self.assertTrue(any("exactly one story" in e for e in tb.validate(p)))
+
+    def test_cli_exit_codes(self):
+        d = self.root / "d.txt"
+        d.write_text("No criteria here.", encoding="utf-8")
+        script = str(PLUGIN / "skills" / "build-story" / "scripts" / "ticket_brief.py")
+        run = lambda *a: subprocess.run([sys.executable, script, *a], capture_output=True, text=True, cwd=self.root)
+        self.assertEqual(run("render", "--key", "CLM-483", "--summary", "S", "--description-file", str(d)).returncode, 2)
+        d.write_text("Acceptance criteria:\n- one\n- two", encoding="utf-8")
+        r = run("render", "--key", "clm-483", "--summary", "S", "--description-file", str(d))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("AC-1..AC-2", r.stdout)
+        self.assertEqual(run("validate", "tickets/clm-483.md").returncode, 0)
+
+    def test_briefs_are_guarded_like_specs(self):
+        hook = (PLUGIN / "hooks" / "validate_on_write.py").read_text(encoding="utf-8")
+        self.assertIn('"tickets": SKILLS / "build-story" / "scripts" / "ticket_brief.py"', hook)
+        for name in ("sdlc-build.yml", "sdlc-pr.yml", "sdlc-fix-findings.yml"):
+            wf = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+            self.assertIn("tickets/", wf.split('SDLC_WRITE_DENY: "', 1)[1].split('"', 1)[0], name)
+            self.assertIn(" tickets ", wf.split("protected=(", 1)[1].split(")", 1)[0] + " ", name)
+        skill = (PLUGIN / "skills" / "build-story" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("### Ticket mode", skill)
 
 
 class PlanEdgeCasesTest(Repo):

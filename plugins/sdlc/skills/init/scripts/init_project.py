@@ -389,6 +389,10 @@ def render_claude_block(a):
                     "in the story PR | owner merges the plan PR; verifier PASS |")
     elif s["build"]:
         rows.append("| Build | `/sdlc:build-story <KEY>` | `plans/<slug>-s<n>.md`, code, tests | plan approved in plan mode, verifier PASS |")
+    if s["build"] and not s["design"]:
+        rows.append("| Build from a ticket | `/sdlc:build-story <KEY>` on a Jira ticket without a spec (ticket mode) | "
+                    "`tickets/<key>.md` (its acceptance criteria), `plans/<key>-s1.md`, code, tests | the person approves "
+                    "the criteria and the plan; verifier PASS |")
     if s["pr_review"]:
         rows.append("| PR review | story PR opened or pushed | review comment, `review:*` label | `review-gate` passes |")
     if s["test"]:
@@ -1097,14 +1101,29 @@ Next steps (one time, in GitHub and Jira):
      variables SDLC_APP_ID{jira_vars}
      secrets SDLC_APP_PRIVATE_KEY, CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY){jira_secret}
   4. Branch protection on {base}: require the checks the stages report
-     (pr / review-gate, pr / traceability, pr / e2e, design-check / validate,
-     intent-check / validate, spec-check / validate) once they have run.
+     ({checks}) once they have run.
 {extra}"""
+
+
+def required_checks(stages):
+    """The status checks the enabled stages report, for branch protection."""
+    checks = []
+    if stages["pr_review"] or stages["build"]:
+        checks += ["pr / review-gate", "pr / traceability"]
+    if stages["test"] or stages["build"]:
+        checks.append("pr / e2e")
+    checks += [c for c, on in (("design-check / validate", stages["ui_design"]),
+                               ("intent-check / validate", stages["plan"]),
+                               ("spec-check / validate", stages["design"])) if on]
+    return checks
 
 
 def checklist(a):
     extra = []
-    if a["jira"].get("enabled"):
+    if a["stages"]["build"] and not a["stages"]["design"]:
+        extra.append("  Build without Plan and Design: build an existing Jira ticket with\n"
+                     "     /sdlc:build-story <KEY> (ticket mode: its acceptance criteria become tickets/<key>.md).")
+    if a["jira"].get("enabled") and a["stages"]["plan"]:
         extra.append(f"  5. Jira Automation (space {a['jira']['space_key']}): on label 'intent', POST to\n"
                      "     https://api.github.com/repos/<owner>/<this repo>/dispatches with\n"
                      "     {\"event_type\":\"create-intent\",\"client_payload\":{\"source\":\"jira\",\"record_id\":\"{{issue.key}}\"}}")
@@ -1120,6 +1139,7 @@ def checklist(a):
                      "     logs in (/mcp), sets FIGMA_TOKEN, and runs /sdlc:design-ui from=mockups.")
     return SETUP_CHECKLIST.format(
         repo=a["sdlc_repo"], base=a["base_branch"],
+        checks=", ".join(required_checks(a["stages"])) or "none for the enabled stages",
         jira_vars=", JIRA_BASE_URL, JIRA_USER_EMAIL" if a["jira"].get("enabled") else "",
         jira_secret=", JIRA_API_TOKEN" if a["jira"].get("enabled") else "",
         extra="\n".join(extra))
