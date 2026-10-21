@@ -44,8 +44,8 @@ Adopt it in a project in one command, **`/sdlc:init`**: see
       file. The secret is the whole file, including the `-----BEGIN` and
       `-----END` lines. Keep it in your password vault, and delete the
       downloaded copy once it's stored.
-   6. Click **Install App** (left menu) > **Install** on the organization
-      > **Only select repositories**, and pick this repo.
+   6. Click **Install App** in the left menu, then **Install** next to the
+      organization. Choose **Only select repositories** and pick this repo.
 
    You can store the two values once, as **organization** variables and
    secrets (organization Settings > Secrets and variables > Actions, with
