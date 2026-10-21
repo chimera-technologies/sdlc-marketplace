@@ -276,7 +276,7 @@ code on `fix/` branches without a plan; the PR still goes through the review
 gate and the tests (not traceability). A fix PR over `fix_max_lines` (300)
 changed lines gets a warning: bigger changes are stories.
 
-## Actions minutes and a self-hosted runner
+## Actions minutes
 
 GitHub-hosted runners bill every job, rounded up to a whole minute, against
 the organization's monthly Actions minutes (2,000 on the Free plan, shared by
@@ -296,23 +296,10 @@ SDLC documents are `intent/`, `specs/`, `tickets/`, `plans/`, `designs/`,
 top-level `*.md`. A newer push to a story PR cancels the older run's review
 gate and tests. A skipped check counts as passed for branch protection.
 
-**Self-hosted runner.** Jobs on your own machine use no Actions minutes. Set
-the organization or repo variable `SDLC_RUNS_ON` to the runner's label
-(usually `self-hosted`) and every job of every workflow runs there; unset, they
-run on `ubuntu-latest`. The machine: Linux x64, about 4 CPUs, 8 GB RAM and 50
-GB disk, with `git`, `bash`, `curl`, `jq`, `python3` and the `gh` CLI. The
-workflows install Node, the stack's toolchains and Claude Code themselves. If
-the tests need system packages (Playwright's browsers with `--with-deps`), the
-runner's user needs passwordless `sudo`, or install them once on the machine.
-Register it in the organization's Settings > Actions > Runners > New
-self-hosted runner, and run it as a service (`./svc.sh install`). One runner
-runs one job at a time; add more on the same machine for parallel jobs.
-
 ## Repo variables and secrets
 
 | Name | Kind | Needed for |
 |---|---|---|
-| `SDLC_RUNS_ON` | variable (optional, org or repo) | the runner label every job uses, for example `self-hosted`; unset = `ubuntu-latest` |
 | `SDLC_APP_ID` | variable | every workflow (the sdlc-bot GitHub App) |
 | `SDLC_APP_PRIVATE_KEY` | secret | every workflow |
 | `ANTHROPIC_API_KEY` (recommended) or `CLAUDE_CODE_OAUTH_TOKEN` | secret | every AI step. Use an API key from an Anthropic Console workspace for CI: it belongs to the organisation and the workspace's spend limit is the hard cost ceiling. A subscription token (`claude setup-token`) belongs to one person and shares their usage limits. Set one, not both |

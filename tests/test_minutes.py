@@ -1,4 +1,4 @@
-"""Actions minutes: jobs start only where they have work, and can run on a self-hosted runner (v0.26.0)."""
+"""Actions minutes: jobs start only where they have work (v0.26.0)."""
 import importlib.util
 import json
 import os
@@ -34,20 +34,7 @@ def job(text, name):
     return text.split(f"\n  {name}:\n", 1)[1].split("\n\n  ", 1)[0]
 
 
-class RunnerTest(unittest.TestCase):
-    def test_every_reusable_job_runs_where_the_project_says(self):
-        for f in sorted(WORKFLOWS.glob("sdlc-*.yml")):
-            s = f.read_text(encoding="utf-8")
-            self.assertNotIn("runs-on: ubuntu-latest", s, f.name)
-            self.assertIn("runs-on: ${{ inputs.runs_on }}", s, f.name)
-            self.assertRegex(s, r"      runs_on:\n        description: .*\n        type: string\n        default: ubuntu-latest\n", f.name)
-
-    def test_callers_pass_the_runner_variable(self):
-        for name, text in callers(stages={"deploy": True}).items():
-            for block in text.split("\n  ")[1:]:
-                if "    uses: " in block:
-                    self.assertIn("runs_on: ${{ vars.SDLC_RUNS_ON || 'ubuntu-latest' }}", block, name)
-
+class MarketplaceCITest(unittest.TestCase):
     def test_marketplace_ci_runs_once_per_pr(self):
         ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
         on = ci.split("\non:\n", 1)[1].split("\n\n", 1)[0]

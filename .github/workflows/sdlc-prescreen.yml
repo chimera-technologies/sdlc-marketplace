@@ -13,10 +13,6 @@ name: "SDLC pre-screen after edits"
 on:
   workflow_call:
     inputs:
-      runs_on:
-        description: "Runner for every job: ubuntu-latest (GitHub-hosted) or a self-hosted label (vars.SDLC_RUNS_ON)"
-        type: string
-        default: ubuntu-latest
       sdlc_ref:
         description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
         type: string
@@ -70,7 +66,7 @@ jobs:
     if: >-
       github.event.action == 'synchronize'
       && (startsWith(github.head_ref, 'spec/') || startsWith(github.head_ref, 'plan/'))
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45   # a review panel (several agents) can take over 10 minutes
     concurrency:
       group: prescreen-${{ github.event.pull_request.number }}

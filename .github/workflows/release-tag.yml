@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   tag:
-    runs-on: ${{ vars.SDLC_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

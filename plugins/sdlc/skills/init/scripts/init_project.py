@@ -464,8 +464,7 @@ def call(a, workflow, extra_with="", if_expr="", extra_secrets=(), permissions="
                   "      app_id: ${{ vars.SDLC_APP_ID }}\n"
                   f"      base_branch: {a['base_branch']}\n"
                   "      jira_base_url: ${{ vars.JIRA_BASE_URL }}\n"
-                  "      jira_user_email: ${{ vars.JIRA_USER_EMAIL }}\n"
-                  f"      runs_on: {RUNS_ON}\n" + extra_with)
+                  "      jira_user_email: ${{ vars.JIRA_USER_EMAIL }}\n" + extra_with)
     cond = f"    needs: {needs}\n" if needs else ""
     cond += f"    if: {if_expr}\n" if if_expr else ""
     cond += permissions
@@ -483,10 +482,6 @@ def header(a, title, what):
 
 # Xray test management (xray_sync.py): optional; the steps skip when these are empty.
 XRAY_SECRETS = ("XRAY_CLIENT_ID", "XRAY_CLIENT_SECRET")
-
-# Where every job runs: GitHub-hosted, or a self-hosted runner when the repo or org sets
-# the variable SDLC_RUNS_ON (for example `self-hosted`): its jobs use no Actions minutes.
-RUNS_ON = "${{ vars.SDLC_RUNS_ON || 'ubuntu-latest' }}"
 
 # A job skipped by its `if` starts no runner and costs nothing, so each job runs only where
 # it has work. The bot names its branches by stage: story/, plan/, test-report/ and
@@ -514,7 +509,7 @@ def on_merge(flag, rerun=""):
 # runner to find nothing to do. Changed files unknown (first push, a huge merge): all run.
 CHANGES_JOB = """  changes:
     if: github.event_name == 'push'
-    runs-on: {runs_on}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       requirements: ${{{{ steps.c.outputs.requirements }}}}
@@ -645,7 +640,7 @@ def render_callers(a):
                "        type: boolean\n        default: false\n" if s["deploy"] else "")
             + "\n"
             + "permissions:\n  contents: read\n\n"
-            + "jobs:\n" + CHANGES_JOB.format(runs_on=RUNS_ON, docs=SDLC_DOCS) + "\n" + "\n".join(jobs))
+            + "jobs:\n" + CHANGES_JOB.format(docs=SDLC_DOCS) + "\n" + "\n".join(jobs))
 
     if s["plan"]:
         files[".github/workflows/sdlc-intake.yml"] = (
@@ -1204,8 +1199,6 @@ def required_checks(stages):
 
 def checklist(a):
     extra = []
-    extra.append("  Optional: run every job on your own machine (no Actions minutes): register a self-hosted\n"
-                 "     runner and set the variable SDLC_RUNS_ON=self-hosted (docs/configuration.md).")
     if a["stages"]["build"] and not a["stages"]["design"]:
         extra.append("  Build without Plan and Design: build an existing Jira ticket with\n"
                      "     /sdlc:build-story <KEY> (ticket mode: its acceptance criteria become tickets/<key>.md).")

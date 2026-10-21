@@ -24,11 +24,6 @@ only to find nothing to do, and each cost a full minute.
   tests and the release) starts only when its own files changed, instead of
   six or seven jobs starting on every merge. A re-run by hand works as
   before.
-- **Self-hosted runners.** Every reusable workflow takes a `runs_on` input
-  (default `ubuntu-latest`); the callers pass the variable `SDLC_RUNS_ON`,
-  so setting it to `self-hosted` moves every job to your machine, which uses
-  no Actions minutes. See "Actions minutes and a self-hosted runner" in
-  docs/configuration.md.
 - **No advisory reviewer by default** in new projects' `.sdlc/review.json`
   (the code-review entry stays as `_example_advisory`).
 - The marketplace's own CI runs once per PR, not again on main, skips
@@ -36,10 +31,10 @@ only to find nothing to do, and each cost a full minute.
 
 **Upgrading**
 
-`/sdlc:init upgrade=v0.26.0` and merge the PR. Optional:
-- to drop the advisory reviewer in an existing project, set `"advisory": []`
-  in `.sdlc/review.json`;
-- for a self-hosted runner, register it and set `SDLC_RUNS_ON`.
+`/sdlc:init upgrade=v0.26.0` and merge the PR. Optional: to drop the
+advisory reviewer in an existing project, set `"advisory": []` in
+`.sdlc/review.json`. Which jobs start when: "Actions minutes" in
+docs/configuration.md.
 
 ## v0.25.0 (2026-10-19)
 

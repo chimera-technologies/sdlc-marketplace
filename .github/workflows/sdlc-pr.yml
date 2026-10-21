@@ -22,10 +22,6 @@ name: "SDLC PR review and Test"
 on:
   workflow_call:
     inputs:
-      runs_on:
-        description: "Runner for every job: ubuntu-latest (GitHub-hosted) or a self-hosted label (vars.SDLC_RUNS_ON)"
-        type: string
-        default: ubuntu-latest
       sdlc_ref:
         description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
         type: string
@@ -95,7 +91,7 @@ env:
 
 jobs:
   config:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-latest
     outputs:
       story: ${{ steps.cfg.outputs.story }}
       gate: ${{ steps.cfg.outputs.gate }}
@@ -148,7 +144,7 @@ jobs:
   review-gate:
     needs: config
     if: needs.config.outputs.gate == 'true'
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45   # a review panel (several agents) can take over 10 minutes
     concurrency:   # a newer push to the PR cancels this run's review: it would review old code
       group: sdlc-review-gate-${{ github.event.pull_request.number }}
@@ -308,7 +304,7 @@ jobs:
   advisory:
     needs: config
     if: needs.config.outputs.gate == 'true' && needs.config.outputs.advisory != '[]'
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true   # advisory reviewers never block
     strategy:
@@ -381,7 +377,7 @@ jobs:
   traceability:
     needs: [config, review-gate]
     if: always() && needs.config.outputs.story == 'true' && needs.review-gate.result == 'success'
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Scope the App token to this repo and the plugin repo
@@ -429,7 +425,7 @@ jobs:
     if: >-
       always() && (needs.review-gate.result == 'success'
       || (needs.config.outputs.gate != 'true' && needs.config.result == 'success' && needs.config.outputs.code == 'true'))
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:   # a newer push to the PR cancels this run's tests
       group: sdlc-e2e-${{ github.event.pull_request.number }}
@@ -547,7 +543,7 @@ jobs:
     # Story PRs: the Jira story goes to In Review when the review gate, traceability and the
     # tests pass, and back to In Progress when one of them fails (autofix or a person fixes it).
     if: always() && needs.config.outputs.story == 'true' && inputs.jira_base_url != ''
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true   # Jira never blocks the PR
     steps:
@@ -615,7 +611,7 @@ jobs:
     if: >-
       always() && needs.config.outputs.story == 'true' && inputs.autofix_attempts > 0
       && (needs.e2e.result == 'failure' || needs.traceability.result == 'failure')
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     concurrency:
       group: autofix-${{ github.event.pull_request.number }}
