@@ -19,11 +19,38 @@ Adopt it in a project in one command, **`/sdlc:init`**: see
    owned by" the organization. (For a client's organization, push a copy of
    this repo with its tags into that organization, and use it as
    `sdlc_repo`.)
-2. **Create the sdlc-bot GitHub App.** Go to the organization's Settings >
-   Developer settings > GitHub Apps. Turn the webhook off. Give it these
-   repository permissions: Contents RW, Pull requests RW, Issues RW,
-   Metadata R (and organization Members R for team reviewers). Generate a
-   private key and install the App on this repo.
+2. **Create the sdlc-bot GitHub App.** This App is the identity that opens
+   PRs and posts comments. One App serves every project in the
+   organization. It gives you `SDLC_APP_ID` and `SDLC_APP_PRIVATE_KEY`.
+   1. Go to the organization's **Settings > Developer settings > GitHub
+      Apps > New GitHub App**. You need to be an organization owner.
+   2. Fill in the form:
+      - **GitHub App name**: unique across GitHub, for example
+        `<org>-sdlc-bot`.
+      - **Homepage URL**: any URL, for example the organization's page.
+      - **Webhook**: clear **Active**.
+      - **Repository permissions**: Contents *Read and write*, Pull
+        requests *Read and write*, Issues *Read and write*, Metadata
+        *Read-only*.
+      - **Organization permissions**: Members *Read-only*. This is only
+        needed if you request reviews from teams.
+      - **Where can this GitHub App be installed?**: *Only on this
+        account*.
+   3. Click **Create GitHub App**.
+   4. **`SDLC_APP_ID`**: the App's **General** page shows **App ID**, a
+      number such as `1234567`. Use the App ID, not the *Client ID*.
+   5. **`SDLC_APP_PRIVATE_KEY`**: on the same page, under **Private
+      keys**, click **Generate a private key**. GitHub downloads a `.pem`
+      file. The secret is the whole file, including the `-----BEGIN` and
+      `-----END` lines. Keep it in your password vault, and delete the
+      downloaded copy once it's stored.
+   6. Click **Install App** (left menu) > **Install** on the organization
+      > **Only select repositories**, and pick this repo.
+
+   You can store the two values once, as **organization** variables and
+   secrets (organization Settings > Secrets and variables > Actions, with
+   access for the selected repositories). Then each project only needs to
+   be added to the App and to that list.
 
 ### In each project
 
@@ -38,18 +65,31 @@ claude plugin install sdlc@chimera-sdlc --scope project
 #    writes everything on an sdlc/init branch and opens a PR. Merge it.
 ```
 
-3. **Install the sdlc-bot App** on the project repo.
+3. **Install the sdlc-bot App** on the project repo: go to organization
+   Settings > GitHub Apps (*Installed GitHub Apps*) > sdlc-bot >
+   **Configure** > Repository access, and add the project.
 4. **Add the variables and secrets** in the project, under Settings >
    Secrets and variables > Actions:
 
    | Name | Kind | For |
    |---|---|---|
-   | `SDLC_APP_ID` | variable | the sdlc-bot App |
-   | `SDLC_APP_PRIVATE_KEY` | secret | the sdlc-bot App |
+   | `SDLC_APP_ID` | variable | the sdlc-bot App: its **App ID** (step 2.4 above) |
+   | `SDLC_APP_PRIVATE_KEY` | secret | the sdlc-bot App: the whole `.pem` file (step 2.5 above) |
    | `ANTHROPIC_API_KEY` (recommended) or `CLAUDE_CODE_OAUTH_TOKEN` | secret | every AI step. Use a key from an Anthropic Console workspace that has a monthly spend limit |
    | `JIRA_BASE_URL`, `JIRA_USER_EMAIL` | variables | Jira (optional) |
    | `JIRA_API_TOKEN` | secret | Jira (optional) |
    | `XRAY_CLIENT_ID`, `XRAY_CLIENT_SECRET` | secrets | Xray test cases and results (optional) |
+
+   Add a *variable* on the **Variables** tab and a *secret* on the
+   **Secrets** tab. A value on the wrong tab is not read: for example,
+   `XRAY_CLIENT_ID` added as a variable silently turns Xray off. You can
+   also store them from the command line, in the project folder:
+
+   ```bash
+   gh variable set SDLC_APP_ID --body 1234567                 # the App ID
+   gh secret set SDLC_APP_PRIVATE_KEY < ~/Downloads/<app>.private-key.pem
+   gh secret set ANTHROPIC_API_KEY                            # prompts for the value
+   ```
 
 5. **Branch protection** on `main`: require the checks that init lists
    (`pr / review-gate`, `pr / traceability`, `pr / e2e`, and the
