@@ -242,16 +242,23 @@ def render_review(a):
         "_comment": ("PR review stage (before Test). 'gate' decides whether the PR moves on to Test. "
                      "'advisory' reviewers post comments and never block. Add a custom reviewer to "
                      "'advisory': a plugin skill (marketplace git URL + plugin@marketplace + prompt) or a "
-                     "skill in this repo's .claude/skills/<name>/ (prompt only). {repo} and {pr} are filled in."),
+                     "skill in this repo's .claude/skills/<name>/ (prompt only). {repo} and {pr} are filled in. "
+                     "None by default: each one is an extra job and AI run on every story PR, and the gate "
+                     "already reviews the code. To add Anthropic's code-review, copy '_example_advisory' into "
+                     "'advisory'."),
         "gate": {"skill": "sdlc:review-story", "model": a["models"]["review"], "fail_on": "high"},
-        "advisory": [{
-            "name": "code-review",
-            "marketplace": "https://github.com/anthropics/claude-code.git",
-            "plugin": "code-review@claude-code-plugins",
-            "prompt": "/code-review:code-review --comment {repo}/pull/{pr}",
-            "allowed_tools": "mcp__github_inline_comment__create_inline_comment",
-        }],
+        "advisory": [],
+        "_example_advisory": [ADVISORY_CODE_REVIEW],
     }, indent=2) + "\n"
+
+
+ADVISORY_CODE_REVIEW = {
+    "name": "code-review",
+    "marketplace": "https://github.com/anthropics/claude-code.git",
+    "plugin": "code-review@claude-code-plugins",
+    "prompt": "/code-review:code-review --comment {repo}/pull/{pr}",
+    "allowed_tools": "mcp__github_inline_comment__create_inline_comment",
+}
 
 
 def yaml_line(key, val, comment):
@@ -451,14 +458,16 @@ def secrets_block(indent="    ", extra=()):
     return f"{indent}secrets:\n" + "".join(f"{indent}  {n}: ${{{{ secrets.{n} }}}}\n" for n in names)
 
 
-def call(a, workflow, extra_with="", if_expr="", extra_secrets=(), permissions=""):
+def call(a, workflow, extra_with="", if_expr="", extra_secrets=(), permissions="", needs=""):
     with_lines = (f"      sdlc_ref: {a['sdlc_ref']}\n"
                   f"      sdlc_repo: {a['sdlc_repo']}\n"
                   "      app_id: ${{ vars.SDLC_APP_ID }}\n"
                   f"      base_branch: {a['base_branch']}\n"
                   "      jira_base_url: ${{ vars.JIRA_BASE_URL }}\n"
-                  "      jira_user_email: ${{ vars.JIRA_USER_EMAIL }}\n" + extra_with)
-    cond = f"    if: {if_expr}\n" if if_expr else ""
+                  "      jira_user_email: ${{ vars.JIRA_USER_EMAIL }}\n"
+                  f"      runs_on: {RUNS_ON}\n" + extra_with)
+    cond = f"    needs: {needs}\n" if needs else ""
+    cond += f"    if: {if_expr}\n" if if_expr else ""
     cond += permissions
     return (f"{cond}    uses: {a['sdlc_repo']}/.github/workflows/{workflow}@{a['sdlc_ref']}\n"
             f"    with:\n{with_lines}" + secrets_block(extra=extra_secrets))
@@ -475,18 +484,92 @@ def header(a, title, what):
 # Xray test management (xray_sync.py): optional; the steps skip when these are empty.
 XRAY_SECRETS = ("XRAY_CLIENT_ID", "XRAY_CLIENT_SECRET")
 
+# Where every job runs: GitHub-hosted, or a self-hosted runner when the repo or org sets
+# the variable SDLC_RUNS_ON (for example `self-hosted`): its jobs use no Actions minutes.
+RUNS_ON = "${{ vars.SDLC_RUNS_ON || 'ubuntu-latest' }}"
+
+# A job skipped by its `if` starts no runner and costs nothing, so each job runs only where
+# it has work. The bot names its branches by stage: story/, plan/, test-report/ and
+# sdlc/upgrade- PRs never carry intents, specs or designs; intent/, spec/, plan/ and
+# test-report/ PRs never carry code.
+def _not_prefixes(*prefixes):
+    return " && ".join(f"!startsWith(github.head_ref, '{p}')" for p in prefixes)
+
+
+# (A YAML value must not start with "!", a tag, so the condition opens with a plain test.)
+STAGE_CHECK_IF = "github.event_name == 'pull_request' && " + _not_prefixes("story/", "plan/", "test-report/", "sdlc/upgrade-")
+CODE_PR_IF = "github.event.action != 'closed' && " + _not_prefixes("intent/", "spec/", "plan/", "test-report/")
+
+# SDLC documents: a change only to these runs no tests (sdlc-pr.yml SDLC_DOCS is the same).
+SDLC_DOCS = r"^(intent|specs|tickets|plans|designs|test-reports|requirements|releases|runbooks|docs)/|^[^/]+\.md$"
+
+
+def on_merge(flag, rerun=""):
+    """The `if` of a job after a merge: its own files changed (the changes job), or a re-run of it."""
+    pushed = f"github.event_name == 'push' && needs.changes.outputs.{flag} == 'true'"
+    return f"always() && ({f'inputs.rerun == {rerun!r} || ' if rerun else ''}({pushed}))"
+
+
+# After a merge: which stages it feeds. One small job instead of every stage starting a
+# runner to find nothing to do. Changed files unknown (first push, a huge merge): all run.
+CHANGES_JOB = """  changes:
+    if: github.event_name == 'push'
+    runs-on: {runs_on}
+    timeout-minutes: 5
+    outputs:
+      requirements: ${{{{ steps.c.outputs.requirements }}}}
+      intent: ${{{{ steps.c.outputs.intent }}}}
+      specs: ${{{{ steps.c.outputs.specs }}}}
+      build: ${{{{ steps.c.outputs.build }}}}
+      tests: ${{{{ steps.c.outputs.tests }}}}
+      releases: ${{{{ steps.c.outputs.releases }}}}
+    steps:
+      - name: What this merge changed
+        id: c
+        env:
+          GH_TOKEN: ${{{{ github.token }}}}
+          BEFORE: ${{{{ github.event.before }}}}
+          AFTER: ${{{{ github.sha }}}}
+          SDLC_DOCS: '{docs}'
+        run: |
+          set -uo pipefail
+          out() {{ echo "$1=$2" >> "$GITHUB_OUTPUT"; }}
+          has() {{ if grep -qE "$1" <<<"$files"; then echo true; else echo false; fi; }}
+          files=""
+          if [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            files=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$AFTER" \\
+              --jq 'if (.files | length) < 300 then .files[].filename else empty end' 2>/dev/null || true)
+          fi
+          if [ -z "$files" ]; then
+            echo "Changed files unknown: every stage looks."
+            for k in requirements intent specs build tests releases; do out "$k" true; done
+            exit 0
+          fi
+          code=false
+          if grep -qvE "$SDLC_DOCS" <<<"$files"; then code=true; fi   # code, config or workflows
+          out requirements "$(has '^requirements/')"
+          out intent "$(has '^intent/')"
+          out specs "$(has '^specs/')"
+          out releases "$(has '^releases/')"
+          # Build: a spec, plan or stack merged, or a story (code) merged and the next one starts.
+          if [ "$code" = true ] || [ "$(has '^(specs|plans)/')" = true ]; then out build true; else out build false; fi
+          out tests "$code"
+          echo "Changed:"; head -n 40 <<<"$files"
+"""
+
 
 def render_callers(a):
     s, m, files = a["stages"], a["models"], {}
     jobs = []
     if s["plan"]:
-        jobs.append("  intent-check:\n" + call(a, "sdlc-intent-check.yml"))
+        jobs.append("  intent-check:\n" + call(a, "sdlc-intent-check.yml", if_expr=STAGE_CHECK_IF))
     if s["design"]:
-        jobs.append("  spec-check:\n" + call(a, "sdlc-spec-check.yml"))
+        jobs.append("  spec-check:\n" + call(a, "sdlc-spec-check.yml", if_expr=STAGE_CHECK_IF))
     if s["ui_design"]:
-        jobs.append("  design-check:\n" + call(a, "sdlc-design-check.yml", if_expr="github.event.action != 'closed'"))
+        jobs.append("  design-check:\n" + call(a, "sdlc-design-check.yml",
+                                               if_expr="github.event.action != 'closed' && " + STAGE_CHECK_IF))
     if s["pr_review"] or s["test"]:
-        jobs.append("  pr:\n" + call(a, "sdlc-pr.yml", if_expr="github.event.action != 'closed'",
+        jobs.append("  pr:\n" + call(a, "sdlc-pr.yml", if_expr=CODE_PR_IF,
                                       extra_with=(f"      autofix_attempts: {a['autofix_attempts'] if s['build'] else 0}\n"
                                                   f"      fix_model: {m['build']}\n"),
                                       extra_secrets=XRAY_SECRETS))
@@ -495,7 +578,8 @@ def render_callers(a):
     if s["design"] or s["build"]:
         # Spec and plan PRs: the AI pre-screen again after someone pushes an edit.
         jobs.append("  prescreen:\n" + call(a, "sdlc-prescreen.yml", extra_with=f"      model: {m['review']}\n",
-                                            if_expr="github.event.action == 'synchronize'"))
+                                            if_expr=("github.event.action == 'synchronize' && (startsWith(github.head_ref, 'spec/')"
+                                                     " || startsWith(github.head_ref, 'plan/'))")))
     if jobs:
         files[".github/workflows/sdlc-pull-request.yml"] = (
             header(a, "SDLC pull request", "Every PR: the gates of the stages it touches, and PR review then Test for story PRs.")
@@ -509,34 +593,34 @@ def render_callers(a):
         jobs.append("  requirements:\n" + call(
             a, "sdlc-requirements.yml",
             extra_with=f"      model: {m['requirements']}\n      document: ${{{{ inputs.rerun == 'requirements' && inputs.file || '' }}}}\n",
-            if_expr="github.event_name == 'push' || inputs.rerun == 'requirements'"))
+            needs="changes", if_expr=on_merge("requirements", "requirements")))
     if s["design"]:
         jobs.append("  intent-to-spec:\n" + call(
             a, "sdlc-intent-to-spec.yml",
             extra_with=f"      model: {m['spec']}\n      intent_file: ${{{{ inputs.rerun == 'intent-to-spec' && inputs.file || '' }}}}\n"
                        + ("      ui_design: true\n" if s["ui_design"] else ""),
-            if_expr="github.event_name == 'push' || inputs.rerun == 'intent-to-spec'"))
+            needs="changes", if_expr=on_merge("intent", "intent-to-spec")))
         jobs.append("  spec-to-stories:\n" + call(
             a, "sdlc-spec-to-stories.yml",
             extra_with="      spec_file: ${{ inputs.rerun == 'spec-to-stories' && inputs.file || '' }}\n",
-            if_expr="github.event_name == 'push' || inputs.rerun == 'spec-to-stories'"))
+            needs="changes", if_expr=on_merge("specs", "spec-to-stories")))
     auto_stack = s["design"] and s["build"]
     if auto_stack:
         # A merged spec's stack and cloud decision becomes a stack PR for the tech lead.
         jobs.append("  stack:\n" + call(
             a, "sdlc-spec-to-stack.yml",
             extra_with=f"      model: {m['stack']}\n      spec_file: ${{{{ inputs.rerun == 'stack' && inputs.file || '' }}}}\n",
-            if_expr="github.event_name == 'push' || inputs.rerun == 'stack'"))
+            needs="changes", if_expr=on_merge("specs", "stack")))
     auto_build = s["build"] and a["auto_build"]
     if auto_build:
         jobs.append("  build:\n" + call(
             a, "sdlc-build.yml", extra_secrets=XRAY_SECRETS,
             extra_with=f"      model: {m['build']}\n      spec_file: ${{{{ inputs.rerun == 'build' && inputs.file || '' }}}}\n",
-            if_expr="github.event_name == 'push' || inputs.rerun == 'build'"))
+            needs="changes", if_expr=on_merge("build", "build")))
     if s["test"]:
         # The test report of a merged story reads its PRs, checks and test logs.
         jobs.append("  tests:\n" + call(
-            a, "sdlc-main-tests.yml", if_expr="github.event_name == 'push'", extra_secrets=XRAY_SECRETS,
+            a, "sdlc-main-tests.yml", needs="changes", if_expr=on_merge("tests"), extra_secrets=XRAY_SECRETS,
             permissions=("    permissions:\n      contents: read\n      actions: read\n      checks: read\n"
                          "      issues: read\n      pull-requests: read\n")))
     if s["deploy"]:
@@ -544,7 +628,7 @@ def render_callers(a):
             a, "sdlc-release.yml",
             extra_with=("      release_file: ${{ inputs.rerun == 'release' && inputs.file || '' }}\n"
                         "      allow_destroy: ${{ inputs.rerun == 'release' && inputs.allow_destroy || false }}\n"),
-            if_expr="github.event_name == 'push' || inputs.rerun == 'release'",
+            needs="changes", if_expr=on_merge("releases", "release"),
             extra_secrets=("DEPLOY_TOKEN",),
             # OIDC login to the cloud the spec chose (no long-lived keys).
             permissions="    permissions:\n      contents: read\n      id-token: write\n"))
@@ -561,7 +645,7 @@ def render_callers(a):
                "        type: boolean\n        default: false\n" if s["deploy"] else "")
             + "\n"
             + "permissions:\n  contents: read\n\n"
-            + "jobs:\n" + "\n".join(jobs))
+            + "jobs:\n" + CHANGES_JOB.format(runs_on=RUNS_ON, docs=SDLC_DOCS) + "\n" + "\n".join(jobs))
 
     if s["plan"]:
         files[".github/workflows/sdlc-intake.yml"] = (
@@ -1120,6 +1204,8 @@ def required_checks(stages):
 
 def checklist(a):
     extra = []
+    extra.append("  Optional: run every job on your own machine (no Actions minutes): register a self-hosted\n"
+                 "     runner and set the variable SDLC_RUNS_ON=self-hosted (docs/configuration.md).")
     if a["stages"]["build"] and not a["stages"]["design"]:
         extra.append("  Build without Plan and Design: build an existing Jira ticket with\n"
                      "     /sdlc:build-story <KEY> (ticket mode: its acceptance criteria become tickets/<key>.md).")

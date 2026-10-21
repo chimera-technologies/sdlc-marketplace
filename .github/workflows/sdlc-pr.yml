@@ -22,6 +22,10 @@ name: "SDLC PR review and Test"
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: "Runner for every job: ubuntu-latest (GitHub-hosted) or a self-hosted label (vars.SDLC_RUNS_ON)"
+        type: string
+        default: ubuntu-latest
       sdlc_ref:
         description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
         type: string
@@ -86,21 +90,25 @@ env:
   PLUGIN_DIR: .sdlc-plugin/plugins/sdlc
   HEAD_REF: ${{ github.head_ref }}
   PR: ${{ github.event.pull_request.number }}
+  # SDLC documents: a PR that changes only these runs no tests (they test nothing).
+  SDLC_DOCS: '^(intent|specs|tickets|plans|designs|test-reports|requirements|releases|runbooks|docs)/|^[^/]+\.md$'
 
 jobs:
   config:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     outputs:
       story: ${{ steps.cfg.outputs.story }}
       gate: ${{ steps.cfg.outputs.gate }}
       advisory: ${{ steps.cfg.outputs.advisory }}
       fail_on: ${{ steps.cfg.outputs.fail_on }}
       model: ${{ steps.cfg.outputs.model }}
+      code: ${{ steps.cfg.outputs.code }}
     steps:
       - uses: actions/checkout@v4
       - name: Read .sdlc/review.json
         id: cfg
         env:
+          GH_TOKEN: ${{ github.token }}
           DRAFT: ${{ github.event.pull_request.draft }}
           ADDITIONS: ${{ github.event.pull_request.additions }}
           DELETIONS: ${{ github.event.pull_request.deletions }}
@@ -120,7 +128,15 @@ jobs:
           fi
           advisory=$(jq -c --arg repo "$GITHUB_REPOSITORY" --arg pr "$PR" \
             '[.advisory[]? | .prompt |= (gsub("\\{repo\\}"; $repo) | gsub("\\{pr\\}"; $pr))]' .sdlc/review.json)
+          # Does the PR change anything the tests run (not only SDLC documents)? Unknown = yes.
+          code=true
+          if files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null) \
+             && [ -n "$files" ] && ! grep -qvE "$SDLC_DOCS" <<<"$files"; then
+            code=false
+            echo "Only SDLC documents changed: the tests are skipped on this PR."
+          fi
           {
+            echo "code=$code"
             echo "story=$story"
             echo "gate=$gate"
             echo "fail_on=$(jq -r '.gate.fail_on // "high"' .sdlc/review.json)"
@@ -132,8 +148,11 @@ jobs:
   review-gate:
     needs: config
     if: needs.config.outputs.gate == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 45   # a review panel (several agents) can take over 10 minutes
+    concurrency:   # a newer push to the PR cancels this run's review: it would review old code
+      group: sdlc-review-gate-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     env:
       SDLC_HEADLESS: "1"
       SDLC_WRITE_ALLOW: ".sdlc-output/pr-review.json"
@@ -289,7 +308,7 @@ jobs:
   advisory:
     needs: config
     if: needs.config.outputs.gate == 'true' && needs.config.outputs.advisory != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 30
     continue-on-error: true   # advisory reviewers never block
     strategy:
@@ -362,7 +381,7 @@ jobs:
   traceability:
     needs: [config, review-gate]
     if: always() && needs.config.outputs.story == 'true' && needs.review-gate.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
     steps:
       - name: Scope the App token to this repo and the plugin repo
@@ -405,10 +424,16 @@ jobs:
 
   e2e:
     needs: [config, review-gate]
-    # Story PRs: only after the review gate passes. Other PRs (design, spec, config): always.
-    if: always() && (needs.review-gate.result == 'success' || (needs.config.outputs.gate != 'true' && needs.config.result == 'success'))
-    runs-on: ubuntu-latest
+    # Story PRs: only after the review gate passes. Other PRs: when they change more than
+    # SDLC documents (code, config, workflows); a skipped check counts as passed.
+    if: >-
+      always() && (needs.review-gate.result == 'success'
+      || (needs.config.outputs.gate != 'true' && needs.config.result == 'success' && needs.config.outputs.code == 'true'))
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 15
+    concurrency:   # a newer push to the PR cancels this run's tests
+      group: sdlc-e2e-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     env:
       XRAY_CLIENT_ID: ${{ secrets.XRAY_CLIENT_ID }}
       XRAY_CLIENT_SECRET: ${{ secrets.XRAY_CLIENT_SECRET }}
@@ -522,7 +547,7 @@ jobs:
     # Story PRs: the Jira story goes to In Review when the review gate, traceability and the
     # tests pass, and back to In Progress when one of them fails (autofix or a person fixes it).
     if: always() && needs.config.outputs.story == 'true' && inputs.jira_base_url != ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
     continue-on-error: true   # Jira never blocks the PR
     steps:
@@ -590,7 +615,7 @@ jobs:
     if: >-
       always() && needs.config.outputs.story == 'true' && inputs.autofix_attempts > 0
       && (needs.e2e.result == 'failure' || needs.traceability.result == 'failure')
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 120
     concurrency:
       group: autofix-${{ github.event.pull_request.number }}

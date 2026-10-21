@@ -26,6 +26,10 @@ name: "SDLC Design: intent to spec"
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: "Runner for every job: ubuntu-latest (GitHub-hosted) or a self-hosted label (vars.SDLC_RUNS_ON)"
+        type: string
+        default: ubuntu-latest
       sdlc_ref:
         description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
         type: string
@@ -88,7 +92,7 @@ env:
 
 jobs:
   detect:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     outputs:
       files: ${{ steps.changed.outputs.files }}
     steps:
@@ -123,7 +127,7 @@ jobs:
   draft-spec:
     needs: detect
     if: needs.detect.outputs.files != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 60
     strategy:
       fail-fast: false

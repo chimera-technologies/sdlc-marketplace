@@ -16,6 +16,10 @@ name: "SDLC Design: UI design check"
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: "Runner for every job: ubuntu-latest (GitHub-hosted) or a self-hosted label (vars.SDLC_RUNS_ON)"
+        type: string
+        default: ubuntu-latest
       sdlc_ref:
         description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
         type: string
@@ -63,7 +67,7 @@ env:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

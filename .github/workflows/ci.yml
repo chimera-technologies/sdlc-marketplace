@@ -1,19 +1,24 @@
 name: CI
 
-# Fast, no-API checks on every change to the marketplace. Make "CI / test"
-# a required status check on main.
+# Fast, no-API checks on every PR to the marketplace. Make "CI / test" a required
+# status check on main. They run once, on the PR (not again on main after the merge),
+# not for documentation-only changes (README, docs/), and a newer push cancels the older run.
+# vars.SDLC_RUNS_ON picks a self-hosted runner (no Actions minutes).
 
 on:
   pull_request:
-  push:
-    branches: [main]
+    paths-ignore: ["README.md", "docs/**"]   # documentation only; skills are .md too, so not **.md
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SDLC_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 10
     strategy:
       matrix:
@@ -85,7 +90,7 @@ jobs:
         run: bash -n plugins/sdlc/hooks/run-python.sh
 
   plugin-validate:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SDLC_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -101,7 +106,7 @@ jobs:
 
   workflows:
     # The reusable workflows and the setup-stack action are what every project runs.
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SDLC_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

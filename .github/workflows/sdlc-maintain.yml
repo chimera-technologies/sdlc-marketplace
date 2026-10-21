@@ -10,6 +10,10 @@ name: "SDLC Maintain - checks"
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: "Runner for every job: ubuntu-latest (GitHub-hosted) or a self-hosted label (vars.SDLC_RUNS_ON)"
+        type: string
+        default: ubuntu-latest
       sdlc_ref:
         description: "Tag of the plugin marketplace (same as the uses: @ref)"
         type: string
@@ -44,7 +48,7 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 30
     steps:
       - name: Scope the App token to this repo and the plugin repo

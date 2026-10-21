@@ -15,6 +15,10 @@ name: "SDLC Plan: intent check"
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: "Runner for every job: ubuntu-latest (GitHub-hosted) or a self-hosted label (vars.SDLC_RUNS_ON)"
+        type: string
+        default: ubuntu-latest
       sdlc_ref:
         description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
         type: string
@@ -63,7 +67,7 @@ env:
 jobs:
   validate:
     if: github.event.action != 'closed'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
     steps:
       - name: Scope the App token to this repo and the plugin repo
@@ -146,7 +150,7 @@ jobs:
 
   link-back:
     if: github.event.action == 'closed'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
     steps:
       - name: Scope the App token to this repo and the plugin repo

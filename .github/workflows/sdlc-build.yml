@@ -24,6 +24,10 @@ name: "SDLC Build: plan and build stories"
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: "Runner for every job: ubuntu-latest (GitHub-hosted) or a self-hosted label (vars.SDLC_RUNS_ON)"
+        type: string
+        default: ubuntu-latest
       sdlc_ref:
         description: "Tag of chimera-technologies/sdlc-marketplace to use for skills and scripts (same as the uses: @ref)"
         type: string
@@ -92,7 +96,7 @@ env:
 
 jobs:
   next:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
     outputs:
       plan: ${{ steps.decide.outputs.plan }}
@@ -150,7 +154,7 @@ jobs:
   plan:
     needs: next
     if: needs.next.outputs.plan != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -480,7 +484,7 @@ jobs:
   build:
     needs: next
     if: needs.next.outputs.build != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 120
     strategy:
       fail-fast: false

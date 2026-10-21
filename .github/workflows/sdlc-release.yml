@@ -24,6 +24,10 @@ name: "SDLC Deploy - release"
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: "Runner for every job: ubuntu-latest (GitHub-hosted) or a self-hosted label (vars.SDLC_RUNS_ON)"
+        type: string
+        default: ubuntu-latest
       sdlc_ref:
         description: "Tag of the plugin marketplace (same as the uses: @ref)"
         type: string
@@ -75,7 +79,7 @@ env:
 
 jobs:
   detect:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
     outputs:
       file: ${{ steps.find.outputs.file }}
@@ -157,7 +161,7 @@ jobs:
   tag:
     needs: detect
     if: needs.detect.outputs.version != ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
     steps:
       - name: Scope the App token to this repo and the plugin repo
@@ -193,7 +197,7 @@ jobs:
   staging:
     needs: [detect, tag]
     if: needs.detect.outputs.deploys == 'true' && needs.detect.outputs.staging_environment != ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 60
     environment: ${{ needs.detect.outputs.staging_environment }}
     env:
@@ -276,7 +280,7 @@ jobs:
   production-plan:
     needs: [detect, tag, staging]
     if: always() && needs.tag.result == 'success' && needs.detect.outputs.iac != 'none' && needs.detect.outputs.production_environment != '' && (needs.staging.result == 'success' || needs.staging.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 30
     # No reviewers on this environment; give its identity read-only (plan) rights.
     environment: ${{ needs.detect.outputs.production_plan_environment }}
@@ -351,7 +355,7 @@ jobs:
     # After staging (or with no staging) and the production plan (or no IaC),
     # and only once the environment's reviewers approve.
     if: always() && needs.tag.result == 'success' && needs.detect.outputs.deploys == 'true' && needs.detect.outputs.production_environment != '' && (needs.staging.result == 'success' || needs.staging.result == 'skipped') && (needs.production-plan.result == 'success' || needs.production-plan.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 60
     environment: ${{ needs.detect.outputs.production_environment }}
     env:
@@ -435,7 +439,7 @@ jobs:
   jira:
     needs: [detect, tag, production]
     if: always() && needs.tag.result == 'success' && needs.detect.outputs.jira_keys != '' && inputs.jira_base_url != '' && needs.production.result != 'failure' && needs.production.result != 'cancelled'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 5
     steps:
       - name: Comment the release on each story

@@ -133,7 +133,9 @@ re-running the preflight.
 `fail_on` is `high`, `medium` or `low`. Advisory reviewers are any plugin
 skill (marketplace + plugin + prompt) or a skill in the repo's
 `.claude/skills/` (prompt only); they comment and never block. What the gate
-flags is tuned in `REVIEW.md`.
+flags is tuned in `REVIEW.md`. New projects start with no advisory reviewer
+(each one is an extra job and AI run on every story PR); `review.json` keeps
+the code-review entry under `_example_advisory` to copy in.
 
 ## `.sdlc/deploy.yaml` (Deploy)
 
@@ -274,10 +276,43 @@ code on `fix/` branches without a plan; the PR still goes through the review
 gate and the tests (not traceability). A fix PR over `fix_max_lines` (300)
 changed lines gets a warning: bigger changes are stories.
 
+## Actions minutes and a self-hosted runner
+
+GitHub-hosted runners bill every job, rounded up to a whole minute, against
+the organization's monthly Actions minutes (2,000 on the Free plan, shared by
+all private repos). So every job starts only where it has work; a job skipped
+by its `if` starts no runner and costs nothing:
+
+| Event | Jobs that start |
+|---|---|
+| PR on `intent/`, `spec/` | that stage's check (and the pre-screen on `spec/` after a push) |
+| PR on `plan/` | the pre-screen after a push; no tests, no stage checks |
+| PR on `story/`, `fix/` | `config`, review gate, traceability, tests, `jira`; autofix only on failure |
+| PR on `test-report/`, `sdlc/upgrade-` | `config`, and the tests only if something other than SDLC documents changed |
+| Merge to the base branch | one `changes` job; then only the stages whose files changed: `requirements/` → requirements, `intent/` → intent-to-spec, `specs/` → stories, stack and build, `plans/` → build, code or `.sdlc/` → build and the tests (with the story's test report) |
+
+SDLC documents are `intent/`, `specs/`, `tickets/`, `plans/`, `designs/`,
+`test-reports/`, `requirements/`, `releases/`, `runbooks/`, `docs/` and
+top-level `*.md`. A newer push to a story PR cancels the older run's review
+gate and tests. A skipped check counts as passed for branch protection.
+
+**Self-hosted runner.** Jobs on your own machine use no Actions minutes. Set
+the organization or repo variable `SDLC_RUNS_ON` to the runner's label
+(usually `self-hosted`) and every job of every workflow runs there; unset, they
+run on `ubuntu-latest`. The machine: Linux x64, about 4 CPUs, 8 GB RAM and 50
+GB disk, with `git`, `bash`, `curl`, `jq`, `python3` and the `gh` CLI. The
+workflows install Node, the stack's toolchains and Claude Code themselves. If
+the tests need system packages (Playwright's browsers with `--with-deps`), the
+runner's user needs passwordless `sudo`, or install them once on the machine.
+Register it in the organization's Settings > Actions > Runners > New
+self-hosted runner, and run it as a service (`./svc.sh install`). One runner
+runs one job at a time; add more on the same machine for parallel jobs.
+
 ## Repo variables and secrets
 
 | Name | Kind | Needed for |
 |---|---|---|
+| `SDLC_RUNS_ON` | variable (optional, org or repo) | the runner label every job uses, for example `self-hosted`; unset = `ubuntu-latest` |
 | `SDLC_APP_ID` | variable | every workflow (the sdlc-bot GitHub App) |
 | `SDLC_APP_PRIVATE_KEY` | secret | every workflow |
 | `ANTHROPIC_API_KEY` (recommended) or `CLAUDE_CODE_OAUTH_TOKEN` | secret | every AI step. Use an API key from an Anthropic Console workspace for CI: it belongs to the organisation and the workspace's spend limit is the hard cost ceiling. A subscription token (`claude setup-token`) belongs to one person and shares their usage limits. Set one, not both |
