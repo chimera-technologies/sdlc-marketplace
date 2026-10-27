@@ -17,11 +17,18 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.python }})   # the required check names; the runner image is not part of them
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       matrix:
-        python: ["3.9", "3.13"]   # oldest supported and current
+        # Oldest supported and current Python. 3.9 is past end of life and has no build for
+        # the newest ubuntu-latest, so it runs on the older image that still ships it.
+        include:
+          - python: "3.9"
+            os: ubuntu-22.04
+          - python: "3.13"
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
