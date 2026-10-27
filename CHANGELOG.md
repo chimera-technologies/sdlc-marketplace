@@ -4,6 +4,27 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.27.0 (2026-10-27)
+
+- **Design screens for a Jira ticket built without a spec.** In ticket mode,
+  `/sdlc:build-story <KEY>` now runs `ticket_brief.py screens <KEY>`: it
+  downloads the ticket's image attachments (PNG, JPEG; at most 20, 10 MB
+  each) into `designs/<key>/screens/`, takes images a developer put there,
+  and writes `designs/<key>/design.md` with every screen on the ticket's
+  story. The plan must then name each screen, and the build, the verifier
+  and the review gate compare the UI with them, as with a spec's mockups.
+  The screens are committed with the story. A build-only project can now
+  build UI tickets against their designs.
+- `validate_design.py` accepts `source: images` (screens supplied as plain
+  images, PNG or JPEG) and a ticket brief, `tickets/<key>.md`, as the spec.
+- The download needs `JIRA_BASE_URL`, `JIRA_USER_EMAIL` and `JIRA_API_TOKEN`
+  in the developer's environment; without them, the images go into the
+  folder by hand. A design made from mockups or Figma is never overwritten.
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.27.0` and merge the PR. Nothing else to do.
+
 ## v0.26.0 (2026-10-21)
 
 Fewer GitHub Actions minutes: about half of a project's jobs started a runner

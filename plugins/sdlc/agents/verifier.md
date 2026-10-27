@@ -57,7 +57,7 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
 6. **Scope**: changes outside the plan's Files table, or behaviour that no
    acceptance criterion asks for.
 7. **Design**: if the plan has a Design section, Read each named screen's
-   PNG in `designs/<slug>/screens/` and compare it with the built UI (the
+   image (PNG, or JPEG for screens taken from a ticket) in `designs/<slug>/screens/` and compare it with the built UI (the
    code, and a screenshot of the built UI if the build left one). Report
    missing elements, wrong order, wrong copy or wrong states as findings;
    ignore pixel-level differences.

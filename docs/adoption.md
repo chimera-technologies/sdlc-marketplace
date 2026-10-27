@@ -95,6 +95,14 @@ so no Jira stories, stack PR or automatic build come from it. The story PR
 gets the full PR review, tests, autofix and Jira statuses. Small changes
 need no ticket at all: `/sdlc:fix` (the fix lane).
 
+**Design screens for a ticket**: attach them to the Jira ticket as PNG or
+JPEG images. Ticket mode downloads them into `designs/<key>/screens/` and
+writes `designs/<key>/design.md`, so the plan, the build, the verifier and
+the review gate work against them as they do against a spec's mockups. The
+download needs `JIRA_BASE_URL`, `JIRA_USER_EMAIL` and `JIRA_API_TOKEN` in the
+developer's environment; without them, save the images into
+`designs/<key>/screens/` yourself. The screens are committed with the story.
+
 ## Upgrading
 
 `/sdlc:init upgrade=vX.Y.Z` (or `init_project.py --upgrade vX.Y.Z`) moves

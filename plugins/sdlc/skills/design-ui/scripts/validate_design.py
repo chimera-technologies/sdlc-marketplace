@@ -17,6 +17,13 @@ screen or listed under "No UI", and that referenced stories and REQs exist.
 screens name an HTML mockup, designs/<slug>/mockups/<screen>.html, which must
 be self-contained and static: no scripts, frames or remote resources, so
 render_mockups.py can screenshot it safely with scripts and network off.
+`source: images` screens are plain images someone supplied (a Jira ticket's
+attachments, or files put in screens/; build-story ticket mode writes the
+manifest): the Source column is the original file name, and a screenshot
+may be a PNG or a JPEG.
+
+The spec is specs/<slug>.md, or a ticket brief tickets/<slug>.md (a Jira
+ticket built without a spec, slug = the key in lower case).
 
 Exit code 0 = valid (warnings allowed), 1 = at least one error.
 """
@@ -35,13 +42,15 @@ vi = vs.vi
 
 REQUIRED_KEYS = ["id", "spec", "owner", "created"]
 FIGMA_KEYS = ["figma_file", "figma_file_key"]   # required when source is figma
-SOURCES = ["figma", "mockup"]
+SOURCES = ["figma", "mockup", "images"]
 SECTIONS = ["Screens", "States", "Tokens", "No UI"]
 FIGMA_URL_RE = re.compile(r"^https://(?:www\.)?figma\.com/(?:design|file)/([A-Za-z0-9]+)(?:/|\?|$)")
 NODE_RE = re.compile(r"^\d+[:-]\d+$")
 SCREEN_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 ROW_RE = re.compile(r"^\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*$", re.MULTILINE)
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+# source: images may also store JPEGs (photos and exports attached to a ticket).
+IMAGE_MAGIC = {".png": PNG_MAGIC, ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff"}
 STORY_REF_RE = re.compile(r"\bS\d+\b")
 REQ_REF_RE = re.compile(r"\bREQ-\d+\b")
 # Mockups are rendered with scripts and network off; reject anything that
@@ -122,8 +131,8 @@ def validate(path, owners=None, root=".", check_images=True):
     for key in REQUIRED_KEYS + (FIGMA_KEYS if source == "figma" else []):
         if not fm.get(key):
             errors.append(f"frontmatter: '{key}' is required")
-    if source == "mockup":
-        # Not in Figma yet: the keys may be absent or "none".
+    if source in ("mockup", "images"):
+        # Not in Figma: the keys may be absent or "none".
         for key in FIGMA_KEYS:
             if fm.get(key) == "none":
                 fm.pop(key)
@@ -134,8 +143,9 @@ def validate(path, owners=None, root=".", check_images=True):
         errors.append(f"frontmatter: id {fm['id']!r} must match its folder designs/{path.parent.name}/")
     if fm.get("id") and not vi.SLUG_RE.match(fm["id"]):
         errors.append("frontmatter: id must be a lowercase kebab-case slug")
-    if fm.get("spec") and fm.get("id") and fm["spec"] != f"specs/{fm['id']}.md":
-        errors.append(f"frontmatter: spec must be 'specs/{fm['id']}.md', got {fm['spec']!r}")
+    if fm.get("spec") and fm.get("id") and fm["spec"] not in (f"specs/{fm['id']}.md", f"tickets/{fm['id']}.md"):
+        errors.append(f"frontmatter: spec must be 'specs/{fm['id']}.md' (or the ticket brief "
+                      f"'tickets/{fm['id']}.md'), got {fm['spec']!r}")
 
     url_m = FIGMA_URL_RE.match(fm.get("figma_file", ""))
     if fm.get("figma_file") and not url_m:
@@ -194,15 +204,20 @@ def validate(path, owners=None, root=".", check_images=True):
                 else:
                     for p in mockup_problems(html.read_text(encoding="utf-8", errors="replace")):
                         errors.append(f"screen {sid!r}: {html.as_posix()} {p}")
-        if r["screenshot"] != f"screens/{sid}.png":
-            errors.append(f"screen {sid!r}: screenshot must be screens/{sid}.png, got {r['screenshot']!r}")
+        elif source == "images" and not r["node"]:
+            errors.append(f"screen {sid!r}: Source must name the original image")
+        exts = list(IMAGE_MAGIC) if source == "images" else [".png"]
+        if r["screenshot"] not in [f"screens/{sid}{e}" for e in exts]:
+            errors.append(f"screen {sid!r}: screenshot must be screens/{sid}{'.png' if len(exts) == 1 else '.png, .jpg or .jpeg'}, "
+                          f"got {r['screenshot']!r}")
         elif check_images:
-            png = path.parent / r["screenshot"]
-            if not png.is_file():
-                tool = "render_mockups.py" if source == "mockup" else "export_screens.py"
-                errors.append(f"screen {sid!r}: {png.as_posix()} not found (run {tool})")
-            elif png.read_bytes()[:8] != PNG_MAGIC:
-                errors.append(f"screen {sid!r}: {png.as_posix()} is not a PNG")
+            img = path.parent / r["screenshot"]
+            magic = IMAGE_MAGIC[img.suffix.lower()]
+            if not img.is_file():
+                tool = {"mockup": "render_mockups.py", "images": "ticket_brief.py screens"}.get(source, "export_screens.py")
+                errors.append(f"screen {sid!r}: {img.as_posix()} not found (run {tool})")
+            elif img.read_bytes()[:len(magic)] != magic:
+                errors.append(f"screen {sid!r}: {img.as_posix()} is not a {'PNG' if magic == PNG_MAGIC else 'JPEG'}")
         if not r["stories"]:
             errors.append(f"screen {sid!r}: name at least one story (S<n>)")
 
@@ -230,7 +245,7 @@ def validate(path, owners=None, root=".", check_images=True):
     shots = path.parent / "screens"
     if shots.is_dir():
         listed = {r["screenshot"] for r in rows}
-        for p in sorted(shots.glob("*.png")):
+        for p in sorted(f for f in shots.iterdir() if f.suffix.lower() in IMAGE_MAGIC):
             if f"screens/{p.name}" not in listed:
                 warnings.append(f"{p.as_posix()} is not referenced by any screen")
     return fm, errors, warnings

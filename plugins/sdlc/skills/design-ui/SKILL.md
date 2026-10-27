@@ -17,7 +17,9 @@ Goal: `designs/<slug>/design.md` (a manifest of screens) plus
 and approved by the owner. Build stories then implement against these
 screens.
 
-Two sources, one manifest (`source:` in its frontmatter):
+Two sources this skill makes, one manifest (`source:` in its frontmatter; a
+third, `images`, is screens taken from a Jira ticket by build-story's ticket
+mode, `ticket_brief.py screens`, not made here):
 - **mockup**: one static HTML file per screen in `designs/<slug>/mockups/`,
   rendered to PNG by `render_mockups.py`. Needs no accounts, so the Design
   workflow makes these automatically with every spec.
