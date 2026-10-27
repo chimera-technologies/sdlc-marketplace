@@ -173,6 +173,17 @@ built once, on its primitives and theme, as a shared component. If the
 story is the scaffold (S1), it installs the library, sets up its theme from
 the design's Tokens, and fills in `PATTERNS.md` for the stack.
 
+**An existing codebase without notes**: run
+`python "${CLAUDE_SKILL_DIR}/../init/scripts/codebase_notes.py" status`. If
+`has_code` is true and `patterns` is `template` (or `architecture` is
+false), the repo's conventions are not written down yet. Interactive: tell
+the person that `/sdlc:init learn` writes them from the code for the tech
+lead to review, and that builds then follow the codebase more closely; ask
+whether to run it first or to continue. Headless: continue, reading the
+conventions from the code and the graph, and add "Decision to confirm:
+PATTERNS.md is empty; run /sdlc:init learn" to the plan's Risks and
+rollback section.
+
 Present a plan following `${CLAUDE_SKILL_DIR}/templates/plan.md`:
 - **Design** (required when the story has screens): each screen id and
   what this story must match on it.
