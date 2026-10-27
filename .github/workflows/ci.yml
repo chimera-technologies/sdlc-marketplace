@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   test:
+    name: test (${{ matrix.python }})   # the required check names; the runner image is not part of them
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
