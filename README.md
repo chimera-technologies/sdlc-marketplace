@@ -298,6 +298,12 @@ the developer to approve. Then it plans, writes the tests first, builds,
 verifies and opens the PR. The PR gets the full review gate, tests, autofix,
 Xray and Jira statuses. Small changes need no ticket: use `/sdlc:fix`.
 
+**Design screens** (from v0.27.0): attach them to the Jira ticket as PNG or
+JPEG images. Ticket mode downloads them into `designs/<key>/screens/` (with
+`JIRA_BASE_URL`, `JIRA_USER_EMAIL` and `JIRA_API_TOKEN` set on your machine;
+otherwise save them there yourself), and the plan, the build, the verifier
+and the review gate all work against them.
+
 ## Everyday commands
 
 | Where | Command | What it does |
