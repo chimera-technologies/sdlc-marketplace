@@ -47,11 +47,11 @@ the automation stops when the minutes run out.
 
 ### A. Once per GitHub organization
 
-**A1. Let projects use the marketplace.** In this repo, go to **Settings >
-Actions > General > Access**, and choose "Accessible from repositories
-owned by" the organization. Projects then call its reusable workflows and
-read the plugin. (For a client's organization, push a copy of this repo with
-its tags into that organization, and use it as `sdlc_repo` in init.)
+**A1. Access to the marketplace.** This repo is public, so any project can
+call its reusable workflows and install its plugin: nothing to set up. A
+project in **another GitHub account or organization** (a personal account,
+a client's organization) needs its own bot App instead of A2: see
+[A project in another GitHub account or organization](#a-project-in-another-github-account-or-organization).
 
 **A2. Create the sdlc-bot GitHub App.** This App is the identity that opens
 PRs and posts comments. One App serves every project in the organization.
@@ -268,6 +268,113 @@ Code, or label a Jira ticket `intent` (B9).
 | A Jira status doesn't change | The status doesn't exist in the workflow, or can't be reached from the current one (A6) |
 | An AI step stops with a usage or session limit | The subscription token's limit; use an API key (A3) |
 | Builds or tests fail installing packages | The machine or network can't reach the npm or PyPI registry |
+
+## A project in another GitHub account or organization
+
+A project outside the Chimera organization (in your personal account, or a
+client's organization) uses this public marketplace directly, from
+**v0.29.0**. It needs its **own bot App and keys**: the Chimera sdlc-bot can
+only be installed in the Chimera organization. It takes about 15 minutes the
+first time, then a couple of minutes per additional repo. The steps below
+are for a **personal account**; a client's organization does the same, with
+the [differences](#for-a-clients-organization-instead) at the end.
+
+### 1. Create your own bot App (once per account)
+
+1. **Open the form.** GitHub, your profile picture, **Settings > Developer
+   settings** (bottom of the left menu) **> GitHub Apps > New GitHub App**.
+2. **Fill it in:**
+
+   | Field | Value |
+   |---|---|
+   | **GitHub App name** | Unique across GitHub, e.g. `<you>-sdlc-bot`. PRs and comments will show as `<you>-sdlc-bot[bot]` |
+   | **Homepage URL** | Any URL, e.g. `https://github.com/<you>` |
+   | **Webhook** | Clear **Active** (not needed) |
+   | **Repository permissions** | **Contents** Read and write, **Pull requests** Read and write, **Issues** Read and write, **Metadata** Read-only (set automatically) |
+   | **Organization permissions** | Skip (a personal account has no teams) |
+   | **Where can this GitHub App be installed?** | **Only on this account** |
+
+   Click **Create GitHub App**.
+3. **Note the App ID.** At the top of the App's **General** page: **App ID**,
+   a number like `1234567`. It becomes `SDLC_APP_ID`. Use the App ID, not
+   the *Client ID*.
+4. **Create the private key.** On the same page, **Private keys > Generate a
+   private key**. A `.pem` file downloads. It becomes `SDLC_APP_PRIVATE_KEY`:
+   the whole file, including the `-----BEGIN` and `-----END` lines. Keep it
+   in your password manager.
+5. **Install the App on your repos.** Left menu, **Install App > Install**
+   next to your account **> Only select repositories**, pick the repos,
+   **Install**. Add more repos later in your **Settings > Applications >
+   Installed GitHub Apps > Configure**.
+
+### 2. Add the secrets to each repo
+
+A personal account has no account-wide secrets, so each repo gets its own
+copy. In the repo folder:
+
+```bash
+gh variable set SDLC_APP_ID --body 1234567
+gh secret set SDLC_APP_PRIVATE_KEY < ~/Downloads/<you>-sdlc-bot.<date>.private-key.pem
+gh secret set ANTHROPIC_API_KEY                  # paste when asked
+# if the project uses Jira or Xray:
+gh variable set JIRA_BASE_URL --body https://<site>.atlassian.net
+gh variable set JIRA_USER_EMAIL --body <email>
+gh secret set JIRA_API_TOKEN
+gh secret set XRAY_CLIENT_ID
+gh secret set XRAY_CLIENT_SECRET
+```
+
+The same App and key serve all your repos, so several at once:
+
+```bash
+for r in skills-dashboard another-repo; do
+  gh variable set SDLC_APP_ID -R <you>/$r --body 1234567
+  gh secret set SDLC_APP_PRIVATE_KEY -R <you>/$r < ~/Downloads/<you>-sdlc-bot.*.pem
+done
+```
+
+Then delete the downloaded `.pem` file: the copy in your password manager
+is the one to keep.
+
+### 3. Connect the repo to the marketplace
+
+In the repo, in Claude Code:
+1. `claude plugin marketplace add chimera-technologies/sdlc-marketplace`,
+   then `claude plugin install sdlc@chimera-sdlc --scope project`.
+2. `/sdlc:init`, keeping `sdlc_repo: chimera-technologies/sdlc-marketplace`
+   and a release of **v0.29.0 or later**. Owners are individual users (a
+   personal account has no teams).
+3. Merge the setup PR. The workflows see that the marketplace belongs to
+   another owner: the bot's token covers your repo only, and the plugin is
+   read without it.
+
+**Check it works:** open any PR. Its first workflow step, *Mint short-lived
+GitHub App token*, should pass, and the bot's PRs and comments show as
+`<your-app-name>[bot]`.
+
+### For a client's organization instead
+
+The same, with three differences:
+- **Create the App under the organization**: the organization's **Settings
+  > Developer settings > GitHub Apps > New GitHub App** (an organization
+  owner). Also give it **Organization permissions > Members: Read-only** if
+  reviews should be requested from teams.
+- **Set the App ID and key once** for the whole organization: the
+  organization's **Settings > Secrets and variables > Actions**, with access
+  for the selected repos. A new repo is then added to that list instead of
+  repeating step 2.
+- Owners can be teams (`@client-org/team`).
+
+For a client, consider pinning the release by its **commit SHA** instead of
+the tag, so the code their projects run cannot change under them.
+
+### Why not reuse the Chimera App?
+
+It could be made installable by any account, but every outside repo would
+then need **Chimera's private key** as a secret, which spreads one key that
+can act on all Chimera repos. Separate Apps keep each account's bot and key
+independent: if one key leaks, only that account is affected, and it is
+revoked there.
 
 ## An existing project, or only Build
 
