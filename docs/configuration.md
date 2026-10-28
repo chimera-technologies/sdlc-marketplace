@@ -133,7 +133,9 @@ re-running the preflight.
 `fail_on` is `high`, `medium` or `low`. Advisory reviewers are any plugin
 skill (marketplace + plugin + prompt) or a skill in the repo's
 `.claude/skills/` (prompt only); they comment and never block. What the gate
-flags is tuned in `REVIEW.md`.
+flags is tuned in `REVIEW.md`. New projects start with no advisory reviewer
+(each one is an extra job and AI run on every story PR); `review.json` keeps
+the code-review entry under `_example_advisory` to copy in.
 
 ## `.sdlc/deploy.yaml` (Deploy)
 
@@ -273,6 +275,26 @@ branch, writes a failing test first, and opens a PR. The build guard allows
 code on `fix/` branches without a plan; the PR still goes through the review
 gate and the tests (not traceability). A fix PR over `fix_max_lines` (300)
 changed lines gets a warning: bigger changes are stories.
+
+## Actions minutes
+
+GitHub-hosted runners bill every job, rounded up to a whole minute, against
+the organization's monthly Actions minutes (2,000 on the Free plan, shared by
+all private repos). So every job starts only where it has work; a job skipped
+by its `if` starts no runner and costs nothing:
+
+| Event | Jobs that start |
+|---|---|
+| PR on `intent/`, `spec/` | that stage's check (and the pre-screen on `spec/` after a push) |
+| PR on `plan/` | the pre-screen after a push; no tests, no stage checks |
+| PR on `story/`, `fix/` | `config`, review gate, traceability, tests, `jira`; autofix only on failure |
+| PR on `test-report/`, `sdlc/upgrade-` | `config`, and the tests only if something other than SDLC documents changed |
+| Merge to the base branch | one `changes` job; then only the stages whose files changed: `requirements/` → requirements, `intent/` → intent-to-spec, `specs/` → stories, stack and build, `plans/` → build, code or `.sdlc/` → build and the tests (with the story's test report) |
+
+SDLC documents are `intent/`, `specs/`, `tickets/`, `plans/`, `designs/`,
+`test-reports/`, `requirements/`, `releases/`, `runbooks/`, `docs/` and
+top-level `*.md`. A newer push to a story PR cancels the older run's review
+gate and tests. A skipped check counts as passed for branch protection.
 
 ## Repo variables and secrets
 

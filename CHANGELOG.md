@@ -4,6 +4,38 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.26.0 (2026-10-21)
+
+Fewer GitHub Actions minutes: about half of a project's jobs started a runner
+only to find nothing to do, and each cost a full minute.
+
+- **PR stage checks start only where they can have work.** intent-check,
+  spec-check and design-check skip `story/`, `plan/`, `test-report/` and
+  `sdlc/upgrade-` PRs (they never carry intents, specs or designs). PR review
+  and tests skip `intent/`, `spec/`, `plan/` and `test-report/` PRs. The
+  pre-screen runs only on `spec/` and `plan/` PRs. A skipped job starts no
+  runner and counts as passed.
+- **No tests on PRs that change only SDLC documents** (`sdlc-pr` `config`
+  now outputs `code`). Story PRs always run them.
+- **A newer push cancels the older run's review gate and tests** on the same
+  PR (job concurrency).
+- **After a merge, one `changes` job decides which stages start.** Each
+  stage (requirements, intent-to-spec, spec-to-stories, stack, build, the
+  tests and the release) starts only when its own files changed, instead of
+  six or seven jobs starting on every merge. A re-run by hand works as
+  before.
+- **No advisory reviewer by default** in new projects' `.sdlc/review.json`
+  (the code-review entry stays as `_example_advisory`).
+- The marketplace's own CI runs once per PR, not again on main, skips
+  documentation-only PRs and cancels superseded runs.
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.26.0` and merge the PR. Optional: to drop the
+advisory reviewer in an existing project, set `"advisory": []` in
+`.sdlc/review.json`. Which jobs start when: "Actions minutes" in
+docs/configuration.md.
+
 ## v0.25.0 (2026-10-19)
 
 - **Build an existing Jira ticket without a spec (ticket mode).**
