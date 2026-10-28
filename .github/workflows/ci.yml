@@ -1,23 +1,34 @@
 name: CI
 
-# Fast, no-API checks on every change to the marketplace. Make "CI / test"
-# a required status check on main.
+# Fast, no-API checks on every PR to the marketplace. Make "CI / test" a required
+# status check on main. They run once, on the PR (not again on main after the merge),
+# not for documentation-only changes (README, docs/), and a newer push cancels the older run.
 
 on:
   pull_request:
-  push:
-    branches: [main]
+    paths-ignore: ["README.md", "docs/**"]   # documentation only; skills are .md too, so not **.md
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.python }})   # the required check names; the runner image is not part of them
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       matrix:
-        python: ["3.9", "3.13"]   # oldest supported and current
+        # Oldest supported and current Python. 3.9 is past end of life and has no build for
+        # the newest ubuntu-latest, so it runs on the older image that still ships it.
+        include:
+          - python: "3.9"
+            os: ubuntu-22.04
+          - python: "3.13"
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
