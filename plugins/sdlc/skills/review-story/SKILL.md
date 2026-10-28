@@ -35,7 +35,7 @@ Arguments: `$ARGUMENTS` (`base` defaults to `origin/main`).
    than a fix is a medium finding: it belongs in a story), that a test
    reproduces the problem and now passes, and every rule from 5 onwards.
 3. The design, if `designs/<slug>/design.md` exists: the screens whose
-   Stories column names this story, and their PNGs (Read them; you can see
+   Stories column names this story, and their images (PNG, or JPEG from a ticket; Read them; you can see
    images). Its Tokens section.
 4. `REVIEW.md` (review rules for this repo: what counts as high, what to
    always check, what to skip), `CLAUDE.md` (stack and coding rules),

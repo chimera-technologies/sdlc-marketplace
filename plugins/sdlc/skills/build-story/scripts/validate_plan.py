@@ -226,7 +226,7 @@ def validate(path, root=".", check_tests=False, must_fix=None):
                           f"add a '## Design' section after '## Story' naming each one{note}")
         for sid in screens:
             if design and not re.search(rf"(?<![a-z0-9-]){re.escape(sid)}(?![a-z0-9-])", design):
-                report.append(f"Design section must reference screen {sid!r} (designs/{spec_slug}/screens/{sid}.png){note}")
+                report.append(f"Design section must reference screen {sid!r} (designs/{spec_slug}/screens/){note}")
     for ph in vi.placeholders(text):
         errors.append(f"unfilled template placeholder: {ph[:60]}")
     for name in MUST_BE_REAL:
