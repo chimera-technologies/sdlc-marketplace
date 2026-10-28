@@ -8,10 +8,15 @@ One script, one mode per hook event (hooks.json wires them up):
                 private keys): secrets come from the environment or a secret
                 store, never from the repo;
               - hand edits of lock files (the package manager writes them);
-              - writes into dependency folders (node_modules/, .venv/, ...).
+              - writes into dependency folders (node_modules/, .venv/, ...);
+              - edits of a migration file already on the base branch
+                (under build.yaml's migrations_path): add a new migration.
   pre-bash    PreToolUse Bash. Blocks commands that change real environments
               or bypass review (terraform apply, kubectl apply, helm upgrade,
-              git push --force or to the base branch, --no-verify, rm -rf /).
+              git push --force or to the base branch, --no-verify, rm -rf /),
+              and commands that drop or wipe a database (DROP, TRUNCATE,
+              flyway clean, prisma migrate reset, ...) unless it is local:
+              localhost, a container, or a host with no dot in its name.
               Before a `graphify query|explain|path`, updates a stale graph so
               the answer matches the code just written.
   post-write  PostToolUse Write|Edit|MultiEdit, for files under code_paths:
@@ -72,6 +77,30 @@ DANGEROUS_COMMANDS = [
     (re.compile(r"\brm\s+-[a-zA-Z]*(?:r[a-zA-Z]*f|f[a-zA-Z]*r)[a-zA-Z]*\s+(?:/|~|\$HOME|\*)(?:\s|$)"),
      "deletes far more than the project."),
 ]
+# Statements that drop or wipe data, when a database client runs them (not `grep "drop table"`).
+DESTRUCTIVE_SQL_RE = re.compile(r"(?i)\bdrop\s+(?:database|schema|table)\b|\btruncate\s+(?:table\s+)?[\w\"`.]+"
+                                r"|\bdropDatabase\s*\(|\bflush(?:all|db)\b")
+DB_CLIENT_RE = re.compile(r"(?i)\b(?:psql|mysql|mariadb|sqlcmd|sqlplus|mongosh|mongo|redis-cli|cqlsh"
+                          r"|clickhouse(?:-client)?|cockroach\s+sql|prisma\s+db\s+execute)\b")
+# Migration and framework commands that drop or wipe data.
+DESTRUCTIVE_DB_RE = re.compile(
+    r"(?i)\bdropdb\b"
+    r"|\bflyway\b[^;&|\n]*\bclean\b|\bliquibase\b[^;&|\n]*\bdrop-?all\b"
+    r"|\bprisma\s+(?:migrate\s+reset|db\s+push\b[^;&|\n]*--force-reset)"
+    r"|\b(?:rails|rake)\s+db:(?:drop|reset|purge|schema:load)\b|\bartisan\s+(?:migrate:(?:fresh|reset)|db:wipe)\b"
+    r"|\bmanage\.py\s+flush\b|\balembic\s+downgrade\s+base\b|\bef\s+database\s+drop\b"
+    r"|\bsequelize\b[^;&|\n]*\bdb:drop\b|\btypeorm\b[^;&|\n]*\bschema:drop\b"
+    r"|\bknex\s+migrate:rollback\b[^;&|\n]*--all")
+# A database host written in a command or setting: a URL's host, a -h/--host option, or Server=/Host=.
+DB_HOST_RE = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://(?:[^@/\s'\"]*@)?(\[[^\]]+\]|[^:/?\s'\";,]+)"
+                        r"|(?:^|\s)(?:-h|--host)[=\s]+['\"]?([^\s'\";]+)"
+                        r"|\b(?:Server|Host|Data Source)\s*=\s*(?:tcp:)?([^;,'\"\s]+)"
+                        r"|\bsqlcmd\b[^;&|\n]*?\s-S\s*['\"]?(?:tcp:)?([^\s,;'\"]+)")
+# Settings that usually hold the connection (the process environment and .env).
+DB_ENV_RE = re.compile(r"(?i)^(?:DATABASE_URL|DB_URL|DB_HOST|PGHOST|MYSQL_HOST|MONGODB_URI|MONGO_URL|REDIS_URL"
+                       r"|SPRING_DATASOURCE_URL|\w*CONNECTION_?STRING\w*)$")
+IN_CONTAINER_RE = re.compile(r"\b(?:docker|podman)\s+(?:compose\s+)?(?:exec|run)\b|\bdocker-compose\s+(?:exec|run)\b")
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"}
 GRAPH_QUERY_RE = re.compile(r"\bgraphify\s+(?:query|explain|path)\b")
 # The linter is not installed yet (before the scaffold story adds it): not a lint failure.
 TOOL_MISSING_RE = re.compile(r"(?i)command not found|is not recognized as|missing script|could not determine executable"
@@ -136,6 +165,67 @@ def dangerous(command, base="main"):
     return None
 
 
+def is_local(host):
+    """Local: this machine, a container, or a name with no dot (a compose service such as `db`)."""
+    host = host.lower().strip("[]")
+    return host in LOCAL_HOSTS or host.endswith(".localhost") or "." not in host
+
+
+def hosts_in(text):
+    return [h for m in DB_HOST_RE.finditer(text) for h in m.groups() if h]
+
+
+def env_hosts(project):
+    """Database hosts in the environment and the project's .env (only the hosts are kept)."""
+    values = [v for k, v in os.environ.items() if DB_ENV_RE.match(k)]
+    try:
+        for raw in (project / ".env").read_text(encoding="utf-8").splitlines():
+            key, sep, val = raw.strip().partition("=")
+            key = key[len("export "):] if key.startswith("export ") else key
+            if sep and DB_ENV_RE.match(key.strip()):
+                values.append(val.strip().strip("'\""))
+    except OSError:
+        pass
+    hosts = []
+    for v in values:
+        # A bare host (DB_HOST=db) has no URL or Server= around it.
+        hosts += hosts_in(v) or ([v] if v and not re.search(r"[=/:;@\s]", v) else [])
+    return hosts
+
+
+def destructive_db(command, project):
+    """Why a command that drops or wipes data is blocked, or None (local targets pass)."""
+    wipes = DESTRUCTIVE_DB_RE.search(command) or (DB_CLIENT_RE.search(command) and DESTRUCTIVE_SQL_RE.search(command))
+    if not wipes or IN_CONTAINER_RE.search(command):
+        return None
+    hosts = hosts_in(command) or env_hosts(project)
+    remote = [h for h in hosts if not is_local(h)]
+    # With no host anywhere, a client connects to this machine; a migration tool reads its own config.
+    if (hosts and not remote) or (not hosts and not DESTRUCTIVE_DB_RE.search(command)):
+        return None
+    where = f"{remote[0]}, which is not a local database" if remote else "a database not shown to be local"
+    return (f"drops or wipes data on {where}. Run it only against localhost or a container (put the local "
+            "DATABASE_URL in the command or in .env); change a real database with a new migration, which the "
+            "release runs (migrate_command).")
+
+
+def merged_migration(project, rel):
+    """True if rel is under build.yaml's migrations_path and already on the base branch."""
+    cfg = guard.load_build_config(project) or {}
+    if not cfg.get("migrations_path") or not under(rel, [cfg["migrations_path"]]):
+        return False
+    base = base_branch(project)
+    for ref in (f"origin/{base}", base):
+        try:
+            res = subprocess.run(["git", "cat-file", "-e", f"{ref}:{rel}"], cwd=project,
+                                 capture_output=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        if res.returncode == 0:
+            return True
+    return False
+
+
 def load_preflight():
     spec = importlib.util.spec_from_file_location("build_preflight", _PREFLIGHT)
     mod = importlib.util.module_from_spec(spec)
@@ -197,6 +287,9 @@ def pre_write(event, project):
     if DEPENDENCY_DIRS & set(rel.split("/")[:-1]):
         problems.append(f"{rel} is inside a dependency or generated folder: change the project's own code, "
                         "or the dependency's version.")
+    if merged_migration(project, rel):
+        problems.append(f"{rel} is a migration already on {base_branch(project)}: databases have run it, so "
+                        "changing it leaves them out of step with the code. Add a new migration instead.")
     for what in find_secrets(new_text(event.get("tool_input") or {})):
         problems.append(f"the text written to {rel} contains what looks like {what}. Read secrets from the "
                         "environment or the secret store, and use an obvious placeholder in examples and tests.")
@@ -205,7 +298,7 @@ def pre_write(event, project):
 
 def pre_bash(event, project):
     command = (event.get("tool_input") or {}).get("command") or ""
-    why = dangerous(command, base_branch(project))
+    why = dangerous(command, base_branch(project)) or destructive_db(command, project)
     if why:
         return 2, [f"`{command.strip()[:200]}` {why}"]
     if GRAPH_QUERY_RE.search(command):

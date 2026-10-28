@@ -61,6 +61,39 @@ something reusable.
 - **Lookups by key use maps or sets**, never plain objects keyed by user
   input (`__proto__`, `constructor`).
 
+## 3b. Databases
+
+- **Schema changes only through migrations.** Every change to tables,
+  columns, indexes or reference data is a new migration file in
+  `migrations_path` (`.sdlc/build.yaml`), made with the project's migration
+  tool. Never change a database by hand, and never edit a migration that
+  has merged: add a new one (the hooks block it).
+- **Expand, then contract.** A breaking change is two steps in two
+  releases: add the new column or table and write to both, then remove the
+  old one once nothing reads it. The release runs migrations before the
+  new code, so the running code must work with the new schema too.
+- **One gateway per store.** Queries live in the store's repository or data
+  module (section 3), with parameters, never strings built from input.
+- **Tests use a real database**, the same engine as production, started by
+  `services_command` or by the tests (Testcontainers), and migrated from
+  empty. Each test creates the data it needs with builders (section 6) and
+  leaves none behind (a transaction rolled back, or the tables it used
+  cleared). No test depends on data another test or a seed left.
+- **Reference data** the app needs to work (countries, statuses) comes from
+  a migration or the seed; **demo data** for staging comes from
+  `seed_command`, safe to run again. Production data is never copied to a
+  test or staging database unless anonymized.
+- **Connection from the environment** (`DATABASE_URL` or the stack's
+  equivalent), never in code or committed files. Locally it comes from
+  `.env` (copied from the committed `.env.example`, which holds only local
+  values); in CI and the release, from the environment's secrets.
+- **Run locally with one command** (`dev_command`): the scaffold adds the
+  local database (for example a `compose.yaml` service), `.env.example`,
+  the migrate and seed scripts, a health endpoint (`dev_check_url`), and a
+  "Run locally" section in the README. CI starts the app that way on every
+  PR, so a setting missing from `.env.example` fails there, not on the next
+  developer's machine.
+
 ## 4. UI components
 
 - **Use the project's UI library** (`ui_library` in `.sdlc/build.yaml`) for
@@ -100,7 +133,8 @@ something reusable.
 - **Builders and fixtures** for test data (`aRating({ level: 5 })`), shared
   in one test helper folder, so a change to the data shape is made once.
 - **Fakes at the gateways**, never mocks of the code under test. Fake the
-  clock and randomness.
+  clock and randomness. The database gateway itself, and the tests of
+  anything that saves or reads data, run against the real database (3b).
 - **Test through the public interface** of a module, not its internals.
 - **Deterministic and offline.** No real network, no sleeps, no order
   dependence.

@@ -237,12 +237,27 @@ After a spec's Technology and architecture decision is accepted:
    `evidence_path` (the folder the browser tests save screenshots in), which
    give per-test results to the test report and to Xray. Commands must not
    contain `#`.
+   **Data**: from the spec's Data lines (`Data store:`, `Migrations:`,
+   `Test database:`, `Run locally:`), `services_command` (starts what the
+   tests need, once, before them, for example
+   `docker compose up -d --wait db`; empty when the tests start their own,
+   as with Testcontainers), `migrations_path` (the folder of the migration
+   files), `dev_command` (the one command that runs the whole app locally
+   from a fresh clone) and `dev_check_url` (the local URL that answers once
+   it is up, such as `http://localhost:3000/healthz`; CI starts the app with
+   `dev_command` and waits for it). With `Data store: none` or no Data
+   lines, leave them empty; `dev_command` and `dev_check_url` apply to any
+   app the spec says how to run locally.
    If the spec decided where it runs, also propose a `deploy` object for
    `.sdlc/deploy.yaml`, using only what the spec decided: `cloud` (`none`,
    `aws`, `azure`, `gcp`), `iac` (`none`, `terraform`), `iac_dir`,
    `iac_var_file` and `iac_backend_config` (with `{env}`), `deploy_command`
    (for example `helm upgrade --install app charts/app -f charts/app/values-$SDLC_ENV.yaml`)
-   and `smoke_command` (reads `SMOKE_URL`). Infrastructure tools are
+   and `smoke_command` (reads `SMOKE_URL`), and with a database
+   `migrate_command` (runs the migrations, reading `DATABASE_URL`, for
+   example `flyway -url="$DATABASE_URL" migrate`), `seed_command` (demo data,
+   safe to run again) and `seed_environments` (`staging` unless the spec
+   says otherwise; never demo data in production). Infrastructure tools are
    toolchains (`terraform@<v>`, `helm@<v>`, `kubectl@<v>`), and their checks
    go in `test_command` (for example `terraform fmt -check -recursive &&
    terraform -chdir=infra validate && tflint --recursive && checkov -d infra`).
@@ -272,6 +287,8 @@ After a spec's Technology and architecture decision is accepted:
    environments `staging`, `production-plan` (no reviewers) and `production`
    (reviewers), each with its OIDC identity variables (the init checklist
    lists them), and the cloud set up to trust this repo's OIDC tokens.
+   With a `migrate_command`: a `DATABASE_URL` secret in each of those
+   environments, pointing at that environment's database.
 
 ## Record the stack, headless (`mode=headless stack=specs/<slug>.md`)
 
@@ -302,8 +319,9 @@ write only `.sdlc-output/init-stack.json`.
    layout changes only when it is decided.
 3. **Decided**: write the same JSON as "Record the stack" above (toolchains,
    install_command, test_command, test_file_command, test_paths, code_paths,
-   report_path, check_command, lint_command, format_command, ui_library, and
-   `deploy` only if the spec decided where it runs), plus
+   report_path, check_command, lint_command, format_command, ui_library,
+   services_command, migrations_path, dev_command, and `deploy` only if the
+   spec decided where it runs), plus
    `"decided": true` and `"evidence"`: for each key you set, the spec line it
    comes from (`{"toolchains": "Node LTS, pinned in package.json"}`).
    Prefer the commands the repo already uses; for a greenfield stack, use

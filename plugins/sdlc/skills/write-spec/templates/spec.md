@@ -35,7 +35,9 @@ Tokens map to its theme. The code quality commands: static checks, per-file
 linter and formatter. "Repository layout: one repo" or "Repository layout:
 one repo per service" (decided the same way); one repo per service adds the
 Service map table: | Component | Responsibility | Owns data | Repo | Stack |
-UI | Product owner | Service owner | Tech lead |, one row per service.>
+UI | Product owner | Service owner | Tech lead |, one row per service.
+With stored data: "Data store:", "Migrations:", "Test database:", "Test
+data:" and "Run locally:" lines; "Data store: none" without.>
 
 ## Design
 <How it works: components, data flow, interfaces, rollout and rollback.

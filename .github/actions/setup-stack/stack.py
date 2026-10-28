@@ -3,7 +3,8 @@
 
 Writes GitHub Actions step outputs (to $GITHUB_OUTPUT, or prints them):
   node, python, java, java_distribution, dotnet, go   toolchain versions ("" = not used)
-  setup_command, install_command, test_command, test_file_command, check_command
+  setup_command, install_command, test_command, test_file_command, check_command,
+  services_command, dev_command, dev_check_url
 
 build.yaml keys (all optional except test_command for the Test stage):
   toolchains: [node@22, python@3.12, java@21, dotnet@8.0, go@1.23, terraform@1.9.8, helm@3.16.2, kubectl@1.31.0]
@@ -16,6 +17,9 @@ build.yaml keys (all optional except test_command for the Test stage):
   check_command: npx tsc --noEmit && npx eslint .   # static checks, run before the tests
   results_path: .sdlc-results/*.xml    # JUnit XML the tests write (per-test results, Xray)
   evidence_path: test-results/         # screenshots the browser tests save
+  services_command: docker compose up -d --wait db   # what the tests need (a database), started before them
+  dev_command: npm run dev:all         # runs the whole app locally
+  dev_check_url: http://localhost:3000/healthz   # answers once dev_command has started it (checked in CI)
 
 Standard library only. Exit 1 on an unknown toolchain.
 """
@@ -31,7 +35,8 @@ from pathlib import Path
 SUPPORTED = ["node", "python", "java", "dotnet", "go", "terraform", "helm", "kubectl"]
 V_PREFIXED = {"helm", "kubectl"}   # their setup actions want v1.2.3
 KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path", "check_command",
-        "results_path", "evidence_path"]
+        "results_path", "evidence_path", "services_command",
+        "dev_command", "dev_check_url"]
 
 
 def load_guard():
@@ -106,7 +111,7 @@ def main():
         out = {k: "" for k in out}
         print("No code under code_paths yet; nothing to install or test.", file=sys.stderr)
     elif args.install_if_code and not has_code(args.root):
-        out["install_command"] = ""
+        out["install_command"] = out["services_command"] = ""
         print("No code under code_paths yet; toolchains only, no install_command.", file=sys.stderr)
     if args.require_tests and not out["test_command"]:
         errors.append("no test_command in .sdlc/build.yaml: record the stack with /sdlc:init stack=specs/<slug>.md")

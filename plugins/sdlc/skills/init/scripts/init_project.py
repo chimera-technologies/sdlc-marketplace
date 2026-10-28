@@ -160,7 +160,8 @@ def normalize(answers):
     st.setdefault("code_paths", ["src/", "tests/"])
     st.setdefault("test_paths", ["tests/"])
     for k in ("install_command", "test_command", "test_file_command", "report_path", "setup_command",
-              "check_command", "lint_command", "format_command", "ui_library", "results_path", "evidence_path"):
+              "check_command", "lint_command", "format_command", "ui_library", "results_path", "evidence_path",
+              "services_command", "migrations_path", "dev_command", "dev_check_url"):
         st.setdefault(k, "")
         if "#" in st[k]:
             errors.append(f"stack.{k} must not contain '#' (build.yaml treats it as a comment)")
@@ -261,6 +262,10 @@ def render_build(a):
         f"ui_library: {s['ui_library']}     # the UI component library the spec chose; empty = no UI",
         f"results_path: {s['results_path']}     # glob of the JUnit XML the tests write: per-test results, Xray",
         f"evidence_path: {s['evidence_path']}     # folder of the screenshots the browser tests save",
+        f"services_command: {s['services_command']}     # starts what the tests need (a database), before them in CI",
+        f"migrations_path: {s['migrations_path']}     # migration files; merged ones are never edited",
+        f"dev_command: {s['dev_command']}     # runs the whole app locally (frontend, backend, database)",
+        f"dev_check_url: {s['dev_check_url']}     # answers once dev_command has started the app; CI checks it",
         "",
         "# Token-saving tools the Build preflight installs and wires up (pinned).",
         f"graphify_version: {GRAPHIFY_VERSION}",
@@ -304,6 +309,9 @@ def render_deploy(a):
         ("version_scheme", "semver", "releases are tagged vMAJOR.MINOR.PATCH"),
         ("deploy_command", d.get("deploy_command", ""), "app deploy per environment (SDLC_ENV set); empty = none"),
         ("smoke_command", d.get("smoke_command", ""), "after each deploy (SMOKE_URL from the environment); failure stops the release"),
+        ("migrate_command", d.get("migrate_command", ""), "database migrations, before each deploy (DATABASE_URL); failure stops the release"),
+        ("seed_command", d.get("seed_command", ""), "demo data after the migrations; safe to run again"),
+        ("seed_environments", d.get("seed_environments", "staging"), "where seed_command runs: staging, production or both"),
         ("staging_environment", "staging", "GitHub environment deployed automatically; empty = none"),
         ("production_plan_environment", "production-plan", "no reviewers; read-only cloud identity for the production plan"),
         ("production_environment", "production", "GitHub environment with required reviewers (the release manager)"),
@@ -1098,6 +1106,10 @@ def set_stack(root, stack):
         "ui_library": stack.get("ui_library", ""),
         "results_path": stack.get("results_path", ""),
         "evidence_path": stack.get("evidence_path", ""),
+        "services_command": stack.get("services_command", ""),
+        "migrations_path": stack.get("migrations_path", ""),
+        "dev_command": stack.get("dev_command", ""),
+        "dev_check_url": stack.get("dev_check_url", ""),
     }
     if stack.get("test_paths"):
         values["test_paths"] = yaml_list(stack["test_paths"])
@@ -1110,13 +1122,16 @@ def set_stack(root, stack):
     return path
 
 
-DEPLOY_KEYS = ["cloud", "iac", "iac_dir", "iac_var_file", "iac_backend_config", "deploy_command", "smoke_command"]
+DEPLOY_KEYS = ["cloud", "iac", "iac_dir", "iac_var_file", "iac_backend_config", "deploy_command", "smoke_command",
+               "migrate_command", "seed_command", "seed_environments"]
+SEED_ENVIRONMENTS = ("staging", "production")
 CLOUDS, IACS = ("none", "aws", "azure", "gcp"), ("none", "terraform")
 # Same list as .github/actions/setup-stack/stack.py SUPPORTED (a test keeps them equal).
 TOOLCHAINS = ["node", "python", "java", "dotnet", "go", "terraform", "helm", "kubectl"]
 TOOLCHAIN_RE = re.compile(r"^([a-z]+)@v?\d[\w.\-]*$")
 STACK_TEXT_KEYS = ["setup_command", "install_command", "test_command", "test_file_command", "report_path",
-                   "check_command", "lint_command", "format_command", "ui_library", "results_path", "evidence_path"]
+                   "check_command", "lint_command", "format_command", "ui_library", "results_path", "evidence_path",
+                   "services_command", "migrations_path", "dev_command", "dev_check_url"]
 
 
 LAYOUTS = ("one-repo", "per-service")
@@ -1193,6 +1208,15 @@ def validate_stack(stack):
             errors.append(f"{key} must be a string")
         elif "#" in stack.get(key, "") or "\n" in stack.get(key, ""):
             errors.append(f"{key} must be one line without '#'")
+    mig = stack.get("migrations_path", "")
+    if isinstance(mig, str) and (mig.startswith("/") or ".." in Path(mig).parts):
+        errors.append("migrations_path must be a relative path inside the repo")
+    url = stack.get("dev_check_url", "")
+    if isinstance(url, str) and url:
+        if not re.match(r"^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?(?:/|$)", url):
+            errors.append("dev_check_url must be a local URL (http://localhost:<port>/...)")
+        if not stack.get("dev_command"):
+            errors.append("dev_check_url needs a dev_command (the command that starts the app)")
     for key in ("test_paths", "code_paths"):
         paths = stack.get(key, [])
         if not isinstance(paths, list) or any(not isinstance(p, str) or p.startswith("/") or ".." in Path(p).parts
@@ -1214,6 +1238,9 @@ def validate_stack(stack):
         val = deploy.get(key, "")
         if isinstance(val, str) and (val.startswith("/") or ".." in Path(val).parts):
             errors.append(f"deploy.{key} must be a relative path inside the repo")
+    seed_envs = deploy.get("seed_environments", "staging")
+    if isinstance(seed_envs, str) and any(e not in SEED_ENVIRONMENTS for e in seed_envs.replace(",", " ").split()):
+        errors.append(f"deploy.seed_environments must name {' and/or '.join(SEED_ENVIRONMENTS)}")
     return errors
 
 
@@ -1508,7 +1535,8 @@ def checklist(a):
                      "     set each environment's OIDC identity as environment variables (production-plan: a\n"
                      "     read-only identity): AWS_ROLE_ARN, AWS_REGION | AZURE_CLIENT_ID, AZURE_TENANT_ID,\n"
                      "     AZURE_SUBSCRIPTION_ID | GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT; and SMOKE_URL\n"
-                     "     for smoke tests. The cloud must trust this repo's GitHub OIDC tokens for that environment.")
+                     "     for smoke tests. The cloud must trust this repo's GitHub OIDC tokens for that environment.\n"
+                     "     With a database: a DATABASE_URL secret on staging and production (migrate_command).")
     if a["stages"]["ui_design"]:
         extra.append("  7. UI design: mockups come with every spec PR. To refine them in Figma, a designer\n"
                      "     logs in (/mcp), sets FIGMA_TOKEN, and runs /sdlc:design-ui from=mockups.")

@@ -502,6 +502,7 @@ jobs:
           # come before the spec decided one or the first story scaffolded it.
           require-tests: ${{ needs.config.outputs.gate == 'true' && 'true' || 'false' }}
           skip-without-code: ${{ needs.config.outputs.gate == 'true' && 'false' || 'true' }}
+          start-services: "true"
 
       - name: Nothing to test yet
         if: steps.stack.outputs.test_command == ''
@@ -541,6 +542,14 @@ jobs:
         env:
           CMD: ${{ steps.stack.outputs.test_command }}
         run: bash -euo pipefail -c "$CMD"
+
+      - name: Check the app starts locally (dev_command)
+        # The same command a developer runs after cloning; catches a broken local setup.
+        if: steps.stack.outputs.test_command != '' && steps.stack.outputs.dev_command != '' && steps.stack.outputs.dev_check_url != ''
+        env:
+          CMD: ${{ steps.stack.outputs.dev_command }}
+          URL: ${{ steps.stack.outputs.dev_check_url }}
+        run: python3 .sdlc-plugin/.github/actions/setup-stack/dev_check.py "$CMD" "$URL"
 
       - name: Record the results in Xray
         # Story PRs, when Xray is set up and the tests write JUnit results (results_path).
@@ -763,6 +772,7 @@ jobs:
         uses: ./.sdlc-plugin/.github/actions/setup-stack
         with:
           require-tests: "true"
+          start-services: "true"
 
       - name: Reproduce the failure
         id: repro

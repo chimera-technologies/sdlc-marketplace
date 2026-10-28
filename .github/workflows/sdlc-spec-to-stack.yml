@@ -355,7 +355,7 @@ jobs:
             jq -r '
               def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
               . as $s | ($s.evidence // {}) as $e
-              | ([ "toolchains","install_command","test_command","test_file_command","test_paths","code_paths","report_path","setup_command" ]
+              | ([ "toolchains","install_command","test_command","test_file_command","test_paths","code_paths","report_path","setup_command","services_command","migrations_path","dev_command","dev_check_url" ]
                  | map(select($s[.] != null and $s[.] != "" and $s[.] != [])) | map({k: ., v: $s[.], e: ($e[.] // "")}))
                 + ([ ($s.deploy // {}) | to_entries[] | select(.value != "" and .value != "none") | {k: ("deploy." + .key), v: .value, e: ($e[.key] // $e["deploy." + .key] // "")} ])
               | .[] | "| `\(.k)` | `\(.v | if type == "array" then join(", ") else . end | cell)` | \(.e | cell) |"' "$p"
@@ -371,6 +371,7 @@ jobs:
             echo "- [ ] Toolchains, install and test commands are the ones the spec decided"
             echo "- [ ] Code and test paths cover where this project's code lives"
             echo "- [ ] Cloud and IaC match the spec (or stay none)"
+            echo "- [ ] With a database: the tests start it (services_command), migrations run before each deploy (migrate_command), and demo data stays out of production (seed_environments)"
           } > "$RUNNER_TEMP/pr-body.md"
           echo "status=changed" >> "$GITHUB_OUTPUT"
 

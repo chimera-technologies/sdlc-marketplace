@@ -54,6 +54,9 @@ The caller gives you the plan path (`plans/<id>.md`). From it, read:
    finding.
 5. **Security** rules the spec lists for this story (SEC-n): input
    validation, no secrets, no unsafe HTML.
+5b. **Data**: a change to the data model comes with a new migration file
+   (never an edit of one already on the base branch), and the tests create
+   the data they use. A missing migration is a high finding.
 6. **Scope**: changes outside the plan's Files table, or behaviour that no
    acceptance criterion asks for.
 7. **Design**: if the plan has a Design section, Read each named screen's

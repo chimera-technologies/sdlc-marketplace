@@ -1,5 +1,5 @@
 {
-  "description": "SDLC guardrails: headless write guard, build guard (no code before preflight and plan), code hooks (no secrets, lock-file or dependency-folder edits, no commands that change real environments or bypass review; format and lint after each code write; Graphify kept current), and intent/spec/plan validation on write.",
+  "description": "SDLC guardrails: headless write guard, build guard (no code before preflight and plan), code hooks (no secrets, lock-file, dependency-folder or merged-migration edits, no commands that change real environments, wipe a non-local database or bypass review; format and lint after each code write; Graphify kept current), and intent/spec/plan validation on write.",
   "hooks": {
     "PreToolUse": [
       {

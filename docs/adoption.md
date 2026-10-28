@@ -167,6 +167,28 @@ decision (`Repository layout:`). The trade-offs are in
   all repositories, and an organization ruleset for the required checks
   save repeating steps 2.3 to 2.5 in every service repo.
 
+## A database
+
+The spec decides it, in Technology and architecture: `Data store:`,
+`Migrations:`, `Test database:`, `Test data:` and `Run locally:` (the
+write-spec skill shows them). The stack PR records them, and the scaffold
+story builds them:
+
+- **Tests in CI** start an empty database with `services_command` (or the
+  tests start one with Testcontainers; GitHub's Ubuntu runners have
+  Docker), migrate it, and create their own data. No real data is needed.
+- **Locally**: clone, copy `.env.example` to `.env`, then `dev_command`
+  (or the README's "Run locally" steps: start the database, migrate, seed,
+  run). `DATABASE_URL` points at the local container. With a
+  `dev_check_url`, every PR checks that the app still starts this way.
+- **Staging and production**: the managed database comes from the IaC.
+  Add a `DATABASE_URL` secret to each GitHub environment. The release runs
+  `migrate_command`, then `seed_command` (staging only by default), then
+  `deploy_command`; production migrates only after its approval.
+
+The hooks block commands that drop or wipe a database that is not local,
+and edits of migrations already merged.
+
 ## Upgrading
 
 `/sdlc:init upgrade=vX.Y.Z` (or `init_project.py --upgrade vX.Y.Z`) moves

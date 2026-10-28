@@ -45,6 +45,13 @@ Existing stack, no new technology:
 - Authentication: the existing portal sign-in and the existing
   service-to-service credentials between portal and claims-core.
 No caching layer is added (see Areas of concern).
+- **Data store:** claims-core's existing database; the portal stores nothing new
+- **Migrations:** claims-core's existing migration tool; one new migration
+  adds the status mapping table (S2), and changes no existing table
+- **Test database:** claims-core's existing test database setup
+- **Test data:** each test creates its customers and claims; the mapping
+  table is reference data, seeded by its migration
+- **Run locally:** unchanged; claims-core's existing local setup
 
 ## Design
 1. The portal back end takes the customer ID from the signed-in session,

@@ -94,6 +94,10 @@ story is never moved.
 | `ui_library` | `shadcn/ui`, `Angular Material`, `MudBlazor` | The UI component library the spec chose; the build uses it for every standard element |
 | `results_path` | `.sdlc-results/*.xml` | Glob of the JUnit XML files `test_command` writes (one per runner, in a folder no runner cleans): per-test results for Xray |
 | `evidence_path` | `test-results/` | Folder of the screenshots the browser tests save (Playwright `screenshot: 'on'`); attached to each test's result in Xray |
+| `services_command` | `docker compose up -d --wait db` | Starts what the tests need (a database), once, before them: in CI (PR, main, build and fix runs) and by the build locally. Empty when the tests start their own (Testcontainers) |
+| `migrations_path` | `db/migrations/` | The migration files. The hooks block edits of one already on the base branch; the review flags model changes without a new one |
+| `dev_command` | `npm run dev:all`, `make dev` | Runs the whole app locally (database, backend, frontend) from a fresh clone; the scaffold story adds it and a "Run locally" README section |
+| `dev_check_url` | `http://localhost:3000/healthz` | With `dev_command`: after the tests, PR and main-tests runs copy `.env.example` to `.env`, run `dev_command`, and fail unless this URL answers within 3 minutes. Then they stop the app |
 | `graphify_version`, `ponytail_ref` | `0.9.71`, `v4.10.0` | Pins for the Build preflight's token-saving tools |
 
 The stack is the tech lead's decision in the spec; record it with
@@ -120,8 +124,8 @@ The plugin's hooks run in every repo with `.sdlc/`, interactive and in CI:
 
 | When | What |
 |---|---|
-| Before a write | Blocks text that looks like a real secret, hand edits of lock files, and writes into dependency folders |
-| Before a command | Blocks `terraform apply`/`destroy`, `kubectl apply`/`delete`, `helm install`/`upgrade`, force pushes, pushes to the base branch and `--no-verify`; updates a stale Graphify graph before `graphify query`, `explain` or `path` |
+| Before a write | Blocks text that looks like a real secret, hand edits of lock files, writes into dependency folders, and edits of a migration already on the base branch (`migrations_path`) |
+| Before a command | Blocks `terraform apply`/`destroy`, `kubectl apply`/`delete`, `helm install`/`upgrade`, force pushes, pushes to the base branch and `--no-verify`; blocks commands that drop or wipe a database (`DROP`, `TRUNCATE`, `flyway clean`, `prisma migrate reset`, `rails db:drop` and the like) unless the database is local: `localhost`, a container (`docker compose exec`), or a host with no dot (a compose service such as `db`), read from the command, then from `DATABASE_URL` and similar settings in the environment or `.env`; updates a stale Graphify graph before `graphify query`, `explain` or `path` |
 | After a code write | Runs `format_command`, then `lint_command`, on the file; lint errors go back to Claude. Marks the graph stale |
 | End of each turn | Updates the graph if code changed (interactive sessions) |
 
@@ -159,7 +163,10 @@ the code-review entry under `_example_advisory` to copy in.
 | `iac`, `iac_dir`, `iac_var_file`, `iac_backend_config` | `none`, `infra`, empty, empty | `terraform`: plan and apply per environment (`{env}` in the file paths); destroy or replace stops the release unless re-run with `allow_destroy` |
 | `smoke_command` | empty | Run after each deploy with `SMOKE_URL`; a failure stops the release |
 | `production_plan_environment` | `production-plan` | Reviewer-free environment with a read-only identity, for the production plan the approvers see |
-| `deploy_command` | empty | Run per environment with `SDLC_ENV`, `SDLC_VERSION`, `SDLC_COMMIT`, `DEPLOY_TOKEN` (secret) and `DEPLOY_TARGET` (variable); empty = tag and GitHub release only |
+| `deploy_command` | empty | Run per environment with `SDLC_ENV`, `SDLC_VERSION`, `SDLC_COMMIT`, `DEPLOY_TOKEN` (secret), `DEPLOY_TARGET` (variable) and `DATABASE_URL` (secret); empty = tag and GitHub release only |
+| `migrate_command` | empty | Database migrations, run per environment before `deploy_command`, with `DATABASE_URL`. A failure stops the release; production migrates only after its approval |
+| `seed_command` | empty | Demo data, after the migrations, safe to run again (needs a `migrate_command`) |
+| `seed_environments` | `staging` | Where `seed_command` runs: `staging`, `production`, or both. Reference data the app needs belongs in a migration, not the seed |
 | `staging_environment` | `staging` | Deployed automatically; empty = no staging |
 | `production_environment` | `production` | Give it required reviewers (the release manager) |
 
@@ -321,4 +328,5 @@ gate and tests. A skipped check counts as passed for branch protection.
 | `DEPLOY_TOKEN` / `DEPLOY_TARGET` | secret / variable, per environment | `deploy_command` |
 | `AWS_ROLE_ARN`, `AWS_REGION` / `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` / `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT` | variables on each environment (`staging`, `production-plan` with a read-only identity, `production`) | OIDC cloud login in releases, for the `cloud` in `.sdlc/deploy.yaml` |
 | `SMOKE_URL` | variable, per environment | `smoke_command` |
+| `DATABASE_URL` | secret, per environment (`staging`, `production`) | `migrate_command`, `seed_command` and `deploy_command`: that environment's database |
 | `FIGMA_TOKEN` | environment variable on the designer's machine | PNG export after refining the mockups in Figma (not needed for the automatic mockups) |
