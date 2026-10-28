@@ -916,7 +916,8 @@ def set_layout(root, services):
     sdlc = load_sdlc(root)
     if sdlc is None:
         raise SystemExit("no .sdlc/sdlc.json: run /sdlc:init first")
-    repo = sdlc.get("repo") or os.environ.get("GITHUB_REPOSITORY") or origin_repo(root)
+    # The repo being written (its origin remote) before the one running the job.
+    repo = sdlc.get("repo") or origin_repo(root) or os.environ.get("GITHUB_REPOSITORY")
     owners_path = root / ".sdlc" / "owners.yaml"
     comps = {c["name"]: c for c in read_components(owners_path.read_text(encoding="utf-8"))} if owners_path.is_file() else {}
     for s in services:

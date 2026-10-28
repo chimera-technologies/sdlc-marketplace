@@ -1,12 +1,14 @@
 """Tests for the repository layout: one repo, or one repo per service (a system repo and its service repos)."""
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "plugins" / "sdlc" / "skills"
@@ -147,6 +149,14 @@ class SystemRepoTest(RepoCase):
         self.assertEqual(self.init("--check-stack-files").returncode, 0)
         # The callers follow on the next init (a bot cannot change workflow files).
         self.assertEqual(self.init("--check").returncode, 1)
+
+    def test_the_repo_name_comes_from_its_own_remote(self):
+        # In CI, GITHUB_REPOSITORY is the repo running the job, not necessarily the one being written.
+        self.init(answers=ANSWERS)
+        with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "acme/somewhere-else"}):
+            self.assertEqual(self.record(LAYOUT).returncode, 0)
+        self.assertEqual(self.sdlc()["repo"], "acme/shop-system")
+        self.assertEqual(json.loads(self.read("services/shop-orders.answers.json"))["system_repo"], "acme/shop-system")
 
     def test_rerunning_init_keeps_the_layout(self):
         self.init(answers=ANSWERS)
