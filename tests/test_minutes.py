@@ -39,7 +39,7 @@ class MarketplaceCITest(unittest.TestCase):
         ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
         on = ci.split("\non:\n", 1)[1].split("\n\n", 1)[0]
         self.assertNotIn("push:", on, "not again on main after the PR passed")
-        self.assertIn('paths-ignore: ["README.md", "docs/**"]', on, "skills are .md: never ignore **.md")
+        self.assertNotIn("paths", on, "every PR runs the required checks: one that never starts blocks the merge (#14)")
         self.assertIn("cancel-in-progress: true", ci)
 
 

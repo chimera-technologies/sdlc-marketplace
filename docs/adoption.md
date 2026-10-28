@@ -113,6 +113,26 @@ download needs `JIRA_BASE_URL`, `JIRA_USER_EMAIL` and `JIRA_API_TOKEN` in the
 developer's environment; without them, save the images into
 `designs/<key>/screens/` yourself. The screens are committed with the story.
 
+## A project in another account or organization
+
+The marketplace is public, so a project anywhere (a personal account, a
+client's organization) can use it directly, without a copy:
+
+1. **Its own sdlc-bot App**, created in that account or organization (step
+   A2 of the README: personal accounts skip the Members permission) and
+   installed on the project. The Chimera App can only be installed in the
+   Chimera organization.
+2. `SDLC_APP_ID`, `SDLC_APP_PRIVATE_KEY` and the other variables and secrets
+   on the project (a personal account has no organization-wide ones).
+3. `/sdlc:init` with `sdlc_repo: chimera-technologies/sdlc-marketplace` and a
+   release tag. Owners must be users in a personal account (no teams).
+
+The workflows see that the marketplace belongs to another owner: the bot's
+token then covers the project only, and the plugin is read with the job's
+own token, which can read any public repo. For a client, consider pinning a
+release by its commit SHA instead of the tag, so the code they run cannot
+change under them.
+
 ## Upgrading
 
 `/sdlc:init upgrade=vX.Y.Z` (or `init_project.py --upgrade vX.Y.Z`) moves
