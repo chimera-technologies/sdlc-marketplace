@@ -95,7 +95,15 @@ jobs:
         id: app-repos
         env:
           SDLC_REPO: ${{ inputs.sdlc_repo }}
-        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+        run: |
+          # The plugin repo under this repo's owner: one token reaches both. Under another owner
+          # (a public marketplace): the token covers this repo only; the plugin is read without it.
+          owner=${SDLC_REPO%%/*}
+          if [ "${owner,,}" = "${GITHUB_REPOSITORY_OWNER,,}" ]; then
+            { echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}"; echo "same_owner=true"; } >> "$GITHUB_OUTPUT"
+          else
+            { echo "names=${GITHUB_REPOSITORY#*/}"; echo "same_owner=false"; } >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Mint short-lived GitHub App token
         id: app
@@ -115,7 +123,7 @@ jobs:
         with:
           repository: ${{ inputs.sdlc_repo }}
           ref: ${{ inputs.sdlc_ref }}
-          token: ${{ steps.app.outputs.token }}
+          token: ${{ steps.app-repos.outputs.same_owner == 'true' && steps.app.outputs.token || github.token }}
           path: .sdlc-plugin
 
       - name: Find and validate the release record
@@ -164,7 +172,15 @@ jobs:
         id: app-repos
         env:
           SDLC_REPO: ${{ inputs.sdlc_repo }}
-        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+        run: |
+          # The plugin repo under this repo's owner: one token reaches both. Under another owner
+          # (a public marketplace): the token covers this repo only; the plugin is read without it.
+          owner=${SDLC_REPO%%/*}
+          if [ "${owner,,}" = "${GITHUB_REPOSITORY_OWNER,,}" ]; then
+            { echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}"; echo "same_owner=true"; } >> "$GITHUB_OUTPUT"
+          else
+            { echo "names=${GITHUB_REPOSITORY#*/}"; echo "same_owner=false"; } >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Mint short-lived GitHub App token
         id: app
@@ -205,7 +221,15 @@ jobs:
         id: app-repos
         env:
           SDLC_REPO: ${{ inputs.sdlc_repo }}
-        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+        run: |
+          # The plugin repo under this repo's owner: one token reaches both. Under another owner
+          # (a public marketplace): the token covers this repo only; the plugin is read without it.
+          owner=${SDLC_REPO%%/*}
+          if [ "${owner,,}" = "${GITHUB_REPOSITORY_OWNER,,}" ]; then
+            { echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}"; echo "same_owner=true"; } >> "$GITHUB_OUTPUT"
+          else
+            { echo "names=${GITHUB_REPOSITORY#*/}"; echo "same_owner=false"; } >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Mint short-lived GitHub App token
         id: app
@@ -226,7 +250,7 @@ jobs:
         with:
           repository: ${{ inputs.sdlc_repo }}
           ref: ${{ inputs.sdlc_ref }}
-          token: ${{ steps.app.outputs.token }}
+          token: ${{ steps.app-repos.outputs.same_owner == 'true' && steps.app.outputs.token || github.token }}
           path: .sdlc-plugin
           persist-credentials: false
 
@@ -289,7 +313,15 @@ jobs:
         id: app-repos
         env:
           SDLC_REPO: ${{ inputs.sdlc_repo }}
-        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+        run: |
+          # The plugin repo under this repo's owner: one token reaches both. Under another owner
+          # (a public marketplace): the token covers this repo only; the plugin is read without it.
+          owner=${SDLC_REPO%%/*}
+          if [ "${owner,,}" = "${GITHUB_REPOSITORY_OWNER,,}" ]; then
+            { echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}"; echo "same_owner=true"; } >> "$GITHUB_OUTPUT"
+          else
+            { echo "names=${GITHUB_REPOSITORY#*/}"; echo "same_owner=false"; } >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Mint short-lived GitHub App token
         id: app
@@ -310,7 +342,7 @@ jobs:
         with:
           repository: ${{ inputs.sdlc_repo }}
           ref: ${{ inputs.sdlc_ref }}
-          token: ${{ steps.app.outputs.token }}
+          token: ${{ steps.app-repos.outputs.same_owner == 'true' && steps.app.outputs.token || github.token }}
           path: .sdlc-plugin
           persist-credentials: false
 
@@ -363,7 +395,15 @@ jobs:
         id: app-repos
         env:
           SDLC_REPO: ${{ inputs.sdlc_repo }}
-        run: echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}" >> "$GITHUB_OUTPUT"
+        run: |
+          # The plugin repo under this repo's owner: one token reaches both. Under another owner
+          # (a public marketplace): the token covers this repo only; the plugin is read without it.
+          owner=${SDLC_REPO%%/*}
+          if [ "${owner,,}" = "${GITHUB_REPOSITORY_OWNER,,}" ]; then
+            { echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}"; echo "same_owner=true"; } >> "$GITHUB_OUTPUT"
+          else
+            { echo "names=${GITHUB_REPOSITORY#*/}"; echo "same_owner=false"; } >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Mint short-lived GitHub App token
         id: app
@@ -384,7 +424,7 @@ jobs:
         with:
           repository: ${{ inputs.sdlc_repo }}
           ref: ${{ inputs.sdlc_ref }}
-          token: ${{ steps.app.outputs.token }}
+          token: ${{ steps.app-repos.outputs.same_owner == 'true' && steps.app.outputs.token || github.token }}
           path: .sdlc-plugin
           persist-credentials: false
 

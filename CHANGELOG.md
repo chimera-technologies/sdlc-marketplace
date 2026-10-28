@@ -4,6 +4,23 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.29.0 (2026-10-28)
+
+- **Use the public marketplace from another account or organization.** Every
+  workflow used to create the bot's token for the project repo and the
+  marketplace repo under the project's owner, so a project in a personal
+  account or a client's organization stopped at its first step. Now, when the
+  marketplace (`sdlc_repo`) belongs to another owner, the token covers the
+  project only and the plugin is checked out with the job's own token, which
+  reads any public repo. Projects under the marketplace's owner work exactly
+  as before. Such a project needs its own sdlc-bot App and its own secrets:
+  see "A project in another account or organization" in docs/adoption.md.
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.29.0` and merge the PR. Nothing else to do for
+projects in the Chimera organization.
+
 ## v0.28.0 (2026-10-27)
 
 - **Learn an existing codebase before building in it.** On a repo that

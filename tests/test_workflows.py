@@ -5,7 +5,11 @@ that tool enforces (a pure-literal `meta` first, matching phase titles, no
 clock or randomness) and keep the skills, the scripts and the reference doc
 in step.
 """
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -94,7 +98,43 @@ class AppTokenScopeTest(unittest.TestCase):
                 prev = steps[k - 1]
                 self.assertIn("id: app-repos", prev, f"{wf.name}: the scope step must come just before the token")
                 self.assertIn('echo "names=${GITHUB_REPOSITORY#*/},${SDLC_REPO#*/}"', prev, wf.name)
+                self.assertIn('echo "names=${GITHUB_REPOSITORY#*/}"', prev, f"{wf.name}: another owner's plugin repo")
         self.assertGreater(found, 20)
+
+    def test_a_marketplace_under_another_owner_is_read_without_the_bot_token(self):
+        """A project in another account or org uses the public marketplace: the bot's token
+        cannot reach it, so the plugin checkout falls back to the job's own token."""
+        checkouts = 0
+        for wf in sorted((ROOT / ".github" / "workflows").glob("sdlc-*.yml")):
+            text = wf.read_text(encoding="utf-8")
+            for m in re.finditer(r"\n\s+token: (.*)\n\s+path: \.sdlc-plugin\n", text):
+                checkouts += 1
+                self.assertEqual(m.group(1), "${{ steps.app-repos.outputs.same_owner == 'true' && "
+                                             "steps.app.outputs.token || github.token }}", wf.name)
+        self.assertGreater(checkouts, 25)
+
+    def run_scope(self, sdlc_repo, repository):
+        bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("no bash")
+        text = (ROOT / ".github" / "workflows" / "sdlc-pr.yml").read_text(encoding="utf-8")
+        block = text.split("        id: app-repos\n", 1)[1].split("        run: |\n", 1)[1].split("\n\n", 1)[0]
+        script = "\n".join(l[10:] for l in block.splitlines())
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "out"
+            env = {**os.environ, "SDLC_REPO": sdlc_repo, "GITHUB_REPOSITORY": repository,
+                   "GITHUB_REPOSITORY_OWNER": repository.split("/")[0], "GITHUB_OUTPUT": str(out)}
+            r = subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return dict(l.split("=", 1) for l in out.read_text(encoding="utf-8").splitlines())
+
+    def test_scope_same_owner_and_another_owner(self):
+        self.assertEqual(self.run_scope("chimera-technologies/sdlc-marketplace", "chimera-technologies/app"),
+                         {"names": "app,sdlc-marketplace", "same_owner": "true"})
+        self.assertEqual(self.run_scope("Chimera-Technologies/sdlc-marketplace", "chimera-technologies/app"),
+                         {"names": "app,sdlc-marketplace", "same_owner": "true"}, "owner names ignore case")
+        self.assertEqual(self.run_scope("chimera-technologies/sdlc-marketplace", "bala/skills-dashboard"),
+                         {"names": "skills-dashboard", "same_owner": "false"})
 
 
 if __name__ == "__main__":
