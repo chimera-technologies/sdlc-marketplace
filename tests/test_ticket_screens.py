@@ -1,4 +1,5 @@
 """Design screens for a Jira ticket built without a spec (build-story ticket mode, v0.27.0)."""
+import datetime as dt
 import importlib.util
 import json
 import struct
@@ -93,7 +94,7 @@ class LocalScreensTest(Project):
         tb.screens("CLM-483", self.root)
         base = (PLAN.replace("id: claims-status-self-service-s1", "id: clm-483-s1")
                 .replace("spec: specs/claims-status-self-service.md", "spec: tickets/clm-483.md")
-                .replace("created: 2026-09-29", "created: 2026-10-27"))
+                .replace("created: 2026-09-29", f"created: {dt.date.today().isoformat()}"))   # same day as the screens
         plan = self.root / "plans" / "clm-483-s1.md"
         plan.write_text(base, encoding="utf-8")
         _, errors, _ = vp.validate(plan, self.root)
