@@ -16,6 +16,37 @@ Three parts: **A** once per GitHub organization, **B** once per project,
 **C** what happens on the first run. Steps marked *(optional)* can be
 skipped; the stage that needs them then stays off or skips that part.
 
+### Which way: inside or outside the Chimera organization?
+
+| | **Inside Chimera** (a repo in `chimera-technologies`) | **Outside Chimera** (your personal account, or a client's organization) |
+|---|---|---|
+| Bot App | The shared **Chimera sdlc-bot**: it already exists | **Your own App** ([outside, step 1](#1-create-your-own-bot-app-once-per-account)) |
+| Bot secrets | Ask a Chimera org admin for the App ID and key, or use organization-wide secrets if they are set | From your own App; per repo in a personal account, organization-wide in a client's organization |
+| Owners | Users or `@chimera-technologies/<team>` | Users in a personal account; users or teams in a client's organization |
+| Release | Any | **v0.29.0 or later** |
+
+**Inside Chimera, in order:**
+1. [Before you start](#before-you-start): the tools, signed in.
+2. Once for the organization, already done for Chimera: A1 and A2. Your own
+   Anthropic key (A3) and, if used, Jira (A5, A6) and Xray (A7), if they
+   aren't set up yet.
+3. Per project: **B1 to B10**. B5 installs the Chimera sdlc-bot on the repo,
+   which needs an organization owner; B6 adds its App ID and key, unless they
+   are set organization-wide.
+4. Then **C**: the first run.
+
+**Outside Chimera, in order:**
+1. [Before you start](#before-you-start): the tools, signed in.
+2. Once for your account or organization: **create your own bot App**
+   ([outside, step 1](#1-create-your-own-bot-app-once-per-account)), and your
+   own Anthropic key (A3) and, if used, Jira (A5, A6) and Xray (A7).
+3. Per project: **B1 to B4** (the repo, the plugin, `/sdlc:init` with a
+   release of v0.29.0 or later). Then, instead of B5 and B6, **install your
+   App and add the secrets** ([outside, step 2](#2-add-the-secrets-to-each-repo)).
+   Then **B7 to B10**.
+4. Then **C**: the first run. The first workflow step on any PR, *Mint
+   short-lived GitHub App token*, shows that your App works.
+
 ### Before you start
 
 **People**
@@ -355,9 +386,9 @@ GitHub App token*, should pass, and the bot's PRs and comments show as
 ### For a client's organization instead
 
 The same, with three differences:
-- **Create the App under the organization**: the organization's **Settings
-  > Developer settings > GitHub Apps > New GitHub App** (an organization
-  owner). Also give it **Organization permissions > Members: Read-only** if
+- **Create the App under the organization**: in the organization's
+  settings, **Settings > Developer settings > GitHub Apps > New GitHub App**
+  (an organization owner). Also give it **Organization permissions > Members: Read-only** if
   reviews should be requested from teams.
 - **Set the App ID and key once** for the whole organization: the
   organization's **Settings > Secrets and variables > Actions**, with access
