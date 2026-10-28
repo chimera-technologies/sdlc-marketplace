@@ -4,6 +4,40 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.30.0 (2026-10-28)
+
+- **Choose one repo or one repo per service, like the stack.** `/sdlc:init`
+  asks for the repository layout (one repo, one repo per service, or decide
+  from the spec later), and specs state it in Technology and architecture
+  (`Repository layout: ...`). One repo per service adds a **Service map**
+  table (component, responsibility, data it owns, repo, stack, UI, owners),
+  checked by `validate_spec.py`. Trade-offs and service boundaries:
+  `write-spec/reference/repository-layout.md`.
+- **System repo.** When a spec decides one repo per service, its stack PR
+  records `role: system` in `.sdlc/sdlc.json`, the services in
+  `.sdlc/owners.yaml` (`repo:`), and one `services/<repo>.answers.json` per
+  service. A system repo keeps Plan and Design and turns Build, PR review,
+  Test, Deploy and Maintain off.
+- **Set up a service repo from its system repo**: `/sdlc:init
+  system=<owner/system-repo>` reads that repo's answers (owners, Jira, plugin
+  tag, stack) and asks only what they do not cover; answers meant for
+  another repo are refused. `/sdlc:init services` shows which service repos
+  exist and are set up.
+- Re-running `/sdlc:init` keeps the recorded layout, and removes a generated
+  workflow caller whose stages are all off (it used to stay and keep
+  running).
+- The stack check on PRs (`spec-check / stack`) also validates
+  `services/*.answers.json`.
+
+Not in this release: sending a cross-service spec's stories to the service
+repos (fanout), and ordering stories across repos. Until then, a system
+repo's specs describe the services and their stories, and each service repo
+takes its stories as its own intents.
+
+**Upgrading**: nothing to do for one repo. A repo with a generated caller
+for a stage that is turned off (for example `sdlc-maintain.yml` with
+Maintain off) loses that caller on the next `/sdlc:init` or upgrade.
+
 ## v0.29.0 (2026-10-28)
 
 - **Use the public marketplace from another account or organization.** Every

@@ -18,6 +18,9 @@ files; `sdlc.json` is regenerated from, the rest are the project's to edit
 | `auto_build` | `true` (default): each story gets a plan PR and is built in CI when it merges (`sdlc-build.yml`); `false`: build by hand with `/sdlc:build-story` |
 | `autofix_attempts` | `2` (default): when a story PR's tests or traceability fail, the bot goes back to Build on the same branch and pushes a fix to the PR, at most this many times; `0` turns it off |
 | `budgets` | AI spend limits for the CI runs (see [AI spend limits](#ai-spend-limits)): `per_run_usd` (a cap per stage) and `monthly_usd` (0 = none) |
+| `role` | Only with one repo per service (absent = one repo): `system` (intents, specs and the Service map; Build, PR review, Test, Deploy and Maintain off) or `service` |
+| `repo` | `owner/name` of this repo (system repos; service repos set up from the system repo) |
+| `system_repo`, `component` | A service repo's system repo and its component name there |
 
 Change it and re-run `/sdlc:init` (or `init_project.py --answers`), or move
 the tag with `init_project.py --upgrade vX.Y.Z`.
@@ -40,6 +43,16 @@ components:
 
 Values must be quoted `"@user"` or `"@org/team"`; validators reject owners
 not listed here.
+
+In a system repo (one repo per service), each service is a component with a
+`repo: "owner/name"` line. Recording a spec's Service map adds or updates
+them (never removes one), and writes `services/<repo>.answers.json` for
+each: the answers that repo is set up from with
+`/sdlc:init system=<owner/system-repo>`. The shared settings in those files
+(plugin tag, Jira, owners, models, budgets) follow the system repo on every
+`/sdlc:init` or upgrade; a service's `stages` and `stack` are kept, and can
+be edited there through a PR before the service is set up.
+`/sdlc:init services` shows which service repos exist and are set up.
 
 ## `.sdlc/jira.yaml`
 

@@ -128,8 +128,10 @@ jobs:
           # Catch-up: while no stack is recorded (no test_command), also take merged
           # specs that never got a stack PR (any state): an upgrade, or a decision
           # that was only accepted later, still reaches Build without a manual re-run.
+          # A system repo (one repo per service) never records a stack of its own: no catch-up.
           tc=$(sed -n 's/^test_command:[[:space:]]*\([^#]*\).*/\1/p' .sdlc/build.yaml 2>/dev/null | head -n1 | sed 's/[[:space:]]*$//')
-          if [ "$files" = "[]" ] && [ -z "$tc" ] && compgen -G 'specs/*.md' >/dev/null; then
+          role=$(jq -r '.role // "single"' .sdlc/sdlc.json 2>/dev/null || echo single)
+          if [ "$files" = "[]" ] && [ -z "$tc" ] && [ "$role" != "system" ] && compgen -G 'specs/*.md' >/dev/null; then
             gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit 500 --json headRefName -q '.[].headRefName' \
               > "$RUNNER_TEMP/branches.txt" 2>/dev/null || true
             for f in specs/*.md; do
@@ -209,6 +211,7 @@ jobs:
           {
             echo "slug=$slug"; echo "reviewer=$reviewer"
             echo "record_id=$(jq -r '.record_id // "none"' "$RUNNER_TEMP/spec.json")"
+            echo "role=$(jq -r '.role // "single"' .sdlc/sdlc.json 2>/dev/null || echo single)"
           } >> "$GITHUB_OUTPUT"
           mkdir -p .sdlc-output
 
@@ -289,10 +292,18 @@ jobs:
         id: apply
         env:
           SLUG: ${{ steps.meta.outputs.slug }}
+          ROLE: ${{ steps.meta.outputs.role }}
         run: |
           set -euo pipefail
           p=.sdlc-output/init-stack.json
+          # What a stack PR may change: the stack, and for one repo per service the layout.
+          paths=(.sdlc/build.yaml .sdlc/deploy.yaml .sdlc/sdlc.json .sdlc/owners.yaml services/)
           jq -e 'type == "object"' "$p" >/dev/null || { echo "::error::$p is not a JSON object"; exit 1; }
+          if [ "$(jq -r '.decided // false' "$p")" != "true" ] && [ "$ROLE" = "system" ]; then
+            # A system repo has no stack: a spec that changes no service needs no PR.
+            echo "::notice::$SPEC changes no service in the Service map: $(jq -r '.reason // ""' "$p")"
+            echo "status=unchanged" >> "$GITHUB_OUTPUT"; exit 0
+          fi
           if [ "$(jq -r '.decided // false' "$p")" != "true" ]; then
             reason=$(jq -r '.reason // "the spec has no final decision"' "$p")
             echo "::notice::Stack not decided in $SPEC: $reason"
@@ -301,9 +312,38 @@ jobs:
             exit 0
           fi
           python3 "$INIT" --stack "$p"
-          if git diff --quiet -- .sdlc/build.yaml .sdlc/deploy.yaml; then
+          git add -N -- services/ 2>/dev/null || true   # new answers files show in the diff
+          if git diff --quiet -- "${paths[@]}"; then
             echo "::notice::the stack in .sdlc/ already matches $SPEC; no PR"
             echo "status=unchanged" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$(jq -r '.layout // "one-repo"' "$p")" = "per-service" ]; then
+            system=$(jq -r .repo .sdlc/sdlc.json)
+            {
+              echo "One repo per service, read from the accepted spec \`$SPEC\` (Repository layout and Service map)."
+              echo
+              echo "**Merge to record it.** This repo is the system repo from now on: intents, specs and the Service map live here, and Build, Test and Deploy run in the service repos."
+              echo
+              if [ "$ROLE" != "system" ]; then
+                echo "**Before merging**, run \`/sdlc:init\` on this branch and push: it regenerates the workflow callers for the system repo (a bot cannot change workflow files)."
+                echo
+              fi
+              echo "| Component | Repo | UI | Stack | Set up with |"
+              echo "|---|---|---|---|---|"
+              jq -r --arg sys "$system" '
+                def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
+                .services[] | "| `\(.component)` | `\(.repo)` | \(if .ui then "yes" else "no" end) | \((.stack.toolchains // []) | join(", ") | if . == "" then "decided by its first spec" else cell end) | `/sdlc:init system=\($sys)` in `\(.repo)` |"' "$p"
+              echo
+              echo "After merging: create each repo above that does not exist yet (same owner as this repo), and run the command in it. \`/sdlc:init services\` here shows which are set up."
+              echo
+              echo '```diff'; git diff -- "${paths[@]}"; echo '```'
+              echo
+              echo "### Review checklist"
+              echo "- [ ] The services, repos and owners are the spec's Service map"
+              echo "- [ ] Each service's stack is the one the spec decided (or left to its first spec)"
+              echo "- [ ] The repo names follow one pattern"
+            } > "$RUNNER_TEMP/pr-body.md"
+            echo "status=changed" >> "$GITHUB_OUTPUT"; exit 0
           fi
           {
             echo "The stack and where it runs, read from the accepted spec \`$SPEC\` (Technology and architecture)."
@@ -322,6 +362,11 @@ jobs:
             echo
             echo '```diff'; git diff -- .sdlc/build.yaml .sdlc/deploy.yaml; echo '```'
             echo
+            layout_reason=$(jq -r '.layout_reason // ""' "$p")
+            if [ -n "$layout_reason" ]; then
+              echo "**Repository layout not decided yet:** $layout_reason. This records the stack for one repo; the layout changes only once the tech lead decides it."
+              echo
+            fi
             echo "### Review checklist"
             echo "- [ ] Toolchains, install and test commands are the ones the spec decided"
             echo "- [ ] Code and test paths cover where this project's code lives"
@@ -351,6 +396,9 @@ jobs:
           add-paths: |
             .sdlc/build.yaml
             .sdlc/deploy.yaml
+            .sdlc/sdlc.json
+            .sdlc/owners.yaml
+            services/*.answers.json
           commit-message: |
             sdlc: record the stack for ${{ steps.meta.outputs.slug }}
 
