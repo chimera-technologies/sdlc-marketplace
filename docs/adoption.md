@@ -72,9 +72,19 @@ Init adds only `.sdlc/`, the `sdlc-*.yml` callers, `.claude/settings.json`
 and a block in `CLAUDE.md`; the code and its own CI stay as they are. Before
 adopting, make the existing suite pass in CI with `test_command`, and use
 `{files}` in `check_command` (for example `npx eslint {files}`) so older
-lint and type problems do not block new work. The first story's preflight
-indexes the codebase with Graphify; record the codebase's conventions in
-`PATTERNS.md` so builds follow them.
+lint and type problems do not block new work.
+
+**Learning the codebase.** On a repo that already has code, `/sdlc:init`
+also writes the notes Build reads before every story, from the code itself:
+`PATTERNS.md` (how this codebase structures features, validates input and
+returns errors, reaches the database and services, builds UI, holds state
+and writes tests, each with the real files) and an `## Architecture`
+section in `CLAUDE.md` (the main modules, entry points, how to run and test,
+and the areas that need care). It maps the code with the Graphify graph
+first, and `codebase_notes.py check` rejects any section left empty or any
+file path that does not exist. The notes come in the setup PR for the tech
+lead to correct and to add what the code cannot show. For a project set up
+earlier, run `/sdlc:init learn`. Builds warn while the notes are still empty.
 
 To adopt **only Build** on an existing backlog, turn the other stages off
 when init asks (or in the answers):

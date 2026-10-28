@@ -4,6 +4,29 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.28.0 (2026-10-27)
+
+- **Learn an existing codebase before building in it.** On a repo that
+  already has code, `/sdlc:init` now maps it with the Graphify graph and
+  writes the notes Build reads before every story: `PATTERNS.md` (project
+  structure, errors and validation, data access, UI components, state and
+  configuration, testing, each naming the real files) and an
+  `## Architecture` section in `CLAUDE.md`, outside the regenerated sdlc
+  block. They come in the setup PR for the tech lead to correct. For a
+  project set up earlier: `/sdlc:init learn` opens them as their own PR.
+- New `init/scripts/codebase_notes.py`: `status` (does the repo have code;
+  are the notes written) and `check` (every section filled or marked
+  `None: <why>`, every cited file path exists, the Architecture section has
+  substance). Made-up paths are rejected.
+- build-story warns when it builds in a codebase whose notes are still the
+  empty template (interactive: offers `/sdlc:init learn` first; headless:
+  records it as a decision to confirm in the plan).
+
+**Upgrading**
+
+`/sdlc:init upgrade=v0.28.0` and merge the PR. For an existing codebase,
+then run `/sdlc:init learn` and have the tech lead review that PR.
+
 ## v0.27.0 (2026-10-27)
 
 - **Design screens for a Jira ticket built without a spec.** In ticket mode,
