@@ -2,13 +2,14 @@
 name: init
 description: Set up a project repo to use the SDLC loop (Plan, Design, UI
   design, Build, PR review, Test, Deploy, Maintain) from this plugin, or
-  upgrade or check an existing setup, record the tech stack the spec
-  decided, or learn an existing codebase into PATTERNS.md and the CLAUDE.md
+  upgrade or check an existing setup, record the tech stack and repository
+  layout the spec decided, set up a service repo from its system repo, or
+  learn an existing codebase into PATTERNS.md and the CLAUDE.md
   architecture notes. Use when someone says "set up the SDLC here", "onboard this repo",
-  "learn this codebase",
+  "learn this codebase", "set up this service repo",
   "use the sdlc plugin in this project", "upgrade the sdlc plugin", "record
   the stack from the spec", or runs /sdlc:init.
-argument-hint: "[stack=specs/<slug>.md [mode=headless]] [upgrade=vX.Y.Z] [check] [learn]"
+argument-hint: "[system=<owner/repo>] [answers=<file>] [services] [stack=specs/<slug>.md [mode=headless]] [upgrade=vX.Y.Z] [check] [learn]"
 ---
 
 # Set up a project for the SDLC loop
@@ -29,6 +30,8 @@ Arguments: `$ARGUMENTS`
 - `upgrade=vX.Y.Z`: go to "Upgrade".
 - `stack=specs/<slug>.md mode=headless`: go to "Record the stack, headless".
 - `stack=specs/<slug>.md`: go to "Record the stack".
+- `system=<owner/repo>` or `answers=<file>`: go to "Set up a service repo".
+- `services`: go to "Service repos status".
 - Otherwise: "Set up". If `.sdlc/sdlc.json` already exists, say so and ask
   whether to regenerate (keeps existing `.sdlc/*` config) or stop.
 
@@ -67,6 +70,15 @@ Arguments: `$ARGUMENTS`
      story by hand with `/sdlc:build-story`.
    - Stack: the detected one, or "decide from the spec later". The stack is
      the tech lead's call in the spec; do not invent one for a new repo.
+   - **Repository layout**, decided the same way: **one repo** (one
+     service, or several services in this repo), **one repo per service**
+     (this repo becomes the system repo: intents, specs and the Service map,
+     no service code; each service gets its own repo), or **decide from the
+     spec later** (the default for a new project: the first spec compares
+     them and the tech lead decides). Explain the trade-off in two lines
+     from `${CLAUDE_SKILL_DIR}/../write-spec/reference/repository-layout.md`.
+     A service repo of an existing system is not set up here: use
+     `/sdlc:init system=<owner/system-repo>`.
    - The plugin tag to pin (default: `sdlc_ref` from `--discover`, the
      latest `v*` tag).
    - **The requirement document**: `--discover`'s `requirements` lists the
@@ -86,6 +98,13 @@ Arguments: `$ARGUMENTS`
     "stack": {"toolchains": ["python@3.12"], "install_command": "pip install -r requirements.txt",
               "test_command": "pytest -q", "test_file_command": "pytest -q {file}", "test_paths": ["tests/"]}}
    ```
+
+   One repo per service: add `"role": "system", "repo": "<owner/name of
+   this repo>"` and leave out `stack` (the system repo has no code; Build,
+   PR review, Test, Deploy and Maintain are off there). Existing service
+   repos go in `components` with their `repo`:
+   `"components": [{"name": "orders", "repo": "acme/shop-orders", "product_owner": "@ord-po"}]`.
+   One repo or decide later: no `role`.
 4. **Branch and generate**: `git checkout -b sdlc/init`, then
    `python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --answers .sdlc-output/init-answers.json`.
    Show the person the list of files it created or updated. If the person
@@ -114,7 +133,42 @@ Arguments: `$ARGUMENTS`
 
 Re-running `/sdlc:init` in a set-up repo is safe: it keeps `.sdlc/*`
 config, except `jira.yaml`, which follows the Jira answer (so turning Jira
-on, or a new site or space, takes effect).
+on, or a new site or space, takes effect). It keeps the recorded layout
+(`role` in `.sdlc/sdlc.json`), regenerates the workflow callers for it, and
+removes a generated caller whose stages are all off.
+
+## Set up a service repo (`system=<owner/repo>` or `answers=<file>`)
+
+One repo per service: the system repo wrote this repo's answers
+(`services/<repo>.answers.json`) when its Service map was recorded. Nothing
+is asked twice.
+
+1. Confirm this is a git repo with a GitHub remote, and run `--discover` as
+   in "Set up" step 1 (what is missing in GitHub).
+2. **Get the answers.** `mkdir -p .sdlc-output`, then for `system=`:
+   `python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --fetch-service-answers <owner/repo> > .sdlc-output/init-answers.json`.
+   `answers=<file>`: copy that file to `.sdlc-output/init-answers.json`.
+   An error that the answers are for another repo, or that the system repo
+   has no file for this one, stops here: show it, and point to the system
+   repo's Service map (`.sdlc/owners.yaml`, `repo:`) or
+   `/sdlc:init services` there. Never edit the answers to make them fit.
+3. **Show a short summary** (component, system repo, owners, Jira, plugin
+   tag, stack or "decided by this service's first spec", UI design on or
+   off) and ask only what the file does not cover: `base_branch` when this
+   repo's default branch is not the one in the file, and the requirement
+   document (usually none: a service's work comes from the system repo's
+   specs, or from intents raised here).
+4. Then "Set up" from step 4 (branch, generate, existing codebase, PR,
+   checklist). The setup PR's description names the system repo.
+
+## Service repos status (`services`)
+
+In a system repo:
+`python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --services-status`.
+Show one line per service: its repo, whether the repo exists, whether it is
+set up from this system repo (and on which plugin tag), and the `next` step.
+A repo that does not exist yet is created by a person (same owner as this
+repo), then set up with `/sdlc:init system=<this repo>` in it.
 
 ## Learn the codebase
 
@@ -194,11 +248,27 @@ After a spec's Technology and architecture decision is accepted:
    terraform -chdir=infra validate && tflint --recursive && checkov -d infra`).
    `--detect` lists what it finds (`infra`: Terraform, Dockerfiles, charts,
    manifests) as suggestions.
+   **Repository layout.** If the spec decided `Repository layout: one repo
+   per service`, propose instead `{"layout": "per-service", "services": [...]}`
+   with no stack keys of its own (this repo becomes the system repo and has
+   no code): one entry per Service map row,
+   `{"component": "orders", "repo": "<owner>/shop-orders", "ui": false,
+   "owners": {"product_owner": "@ord-po", "service_owner": "@org/ord-sre",
+   "tech_lead": "@be-lead"}, "stack": {...}}`. The repo's owner is this
+   repo's owner unless the map names another. `stack` is that service's
+   stack in the same keys as above, from the map's Stack column and the
+   spec (empty `{}` when the spec leaves it to the service's first spec).
+   One repo: no `layout` key (or `"layout": "one-repo"`).
 2. Confirm with the person, write them to `.sdlc-output/init-stack.json`,
    and run `python "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --stack .sdlc-output/init-stack.json`.
 3. Commit `.sdlc/build.yaml` (and `.sdlc/deploy.yaml` if it changed) on a
    `sdlc/stack-<slug>` branch and open a PR. Build stories can start once it
-   merges. With a cloud, tell the person what the release needs: GitHub
+   merges. One repo per service: commit `.sdlc/sdlc.json`,
+   `.sdlc/owners.yaml` and `services/*.answers.json` instead, then re-run
+   `/sdlc:init` (it keeps the new role) so the workflow callers follow, and
+   commit them in the same PR. After it merges, each service repo is created
+   and set up with `/sdlc:init system=<this repo>`; `/sdlc:init services`
+   tracks them. With a cloud, tell the person what the release needs: GitHub
    environments `staging`, `production-plan` (no reviewers) and `production`
    (reviewers), each with its OIDC identity variables (the init checklist
    lists them), and the cloud set up to trust this repo's OIDC tokens.
@@ -225,7 +295,11 @@ write only `.sdlc-output/init-stack.json`.
    "Decision needed", or when the spec recommends no single option (then
    `accepted_by` changes nothing). If open, write
    `{"decided": false, "reason": "<what is still open, quoted>"}` and stop.
-   Never pick between options yourself.
+   Never pick between options yourself. The repository layout follows the
+   same rule, on its own: the spec's `Repository layout:` line and Service
+   map. A stack that is decided with a layout still open is written as
+   decided (one repo) and the open layout goes in `"layout_reason"`; the
+   layout changes only when it is decided.
 3. **Decided**: write the same JSON as "Record the stack" above (toolchains,
    install_command, test_command, test_file_command, test_paths, code_paths,
    report_path, check_command, lint_command, format_command, ui_library, and
@@ -245,6 +319,13 @@ write only `.sdlc-output/init-stack.json`.
    (`npm run test:file -- {file}`, `make test-file FILE={file}`), and say in
    its evidence that the scaffold story adds that script. The same goes for
    any script `test_command` calls (`npm run test:e2e`).
+   **One repo per service decided**: write the `layout` and `services`
+   proposal from "Record the stack" instead, with `"decided": true` and the
+   evidence per service (`{"orders": "Service map row: orders, shop-orders,
+   Java 21"}`). A repo already in the system repo's role keeps its role:
+   in a system repo (`role: system`), a spec that adds or changes services
+   writes only the `layout` and `services` proposal, and a spec with no
+   Service map writes `{"decided": false, "reason": "no Service map change"}`.
 4. Check it: `python3 "${CLAUDE_SKILL_DIR}/scripts/init_project.py" --stack .sdlc-output/init-stack.json --dry-run`
    and fix every error.
 

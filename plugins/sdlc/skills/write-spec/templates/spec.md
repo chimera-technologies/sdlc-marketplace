@@ -32,7 +32,10 @@ Greenfield: two or three options with trade-offs, a recommendation, and
 skill exists; anything outside them goes under Areas of concern. With a UI:
 "UI component library: <name>, because <criteria>" and how the design's
 Tokens map to its theme. The code quality commands: static checks, per-file
-linter and formatter.>
+linter and formatter. "Repository layout: one repo" or "Repository layout:
+one repo per service" (decided the same way); one repo per service adds the
+Service map table: | Component | Responsibility | Owns data | Repo | Stack |
+UI | Product owner | Service owner | Tech lead |, one row per service.>
 
 ## Design
 <How it works: components, data flow, interfaces, rollout and rollback.

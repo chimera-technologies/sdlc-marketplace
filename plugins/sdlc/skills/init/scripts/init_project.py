@@ -8,7 +8,10 @@ person, writes their answers to a JSON file, and runs:
   init_project.py --check                       # report drift, exit 1 if any
   init_project.py --upgrade v0.7.0              # move every pin to a new tag
   init_project.py --detect                      # suggest a stack from repo files
-  init_project.py --stack stack.json            # record the stack (build.yaml)
+  init_project.py --stack stack.json            # record the stack (build.yaml), or
+                                                # one repo per service (the system repo)
+  init_project.py --fetch-service-answers o/sys # a service repo's answers from its system repo
+  init_project.py --services-status             # system repo: which service repos are set up
 
 What it writes (paths relative to the project root):
   .sdlc/sdlc.json            plugin repo + ref, base branch, stages, models:
@@ -29,6 +32,7 @@ What it writes (paths relative to the project root):
 import argparse
 import importlib.util
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -57,6 +61,15 @@ DENY = ["Read(./node_modules/**)", "Read(./.venv/**)", "Read(./target/**)", "Rea
 HANDLE_RE = re.compile(r"^@[A-Za-z0-9-]+(/[A-Za-z0-9._-]+)?$")
 REF_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 JIRA_KEY_RE = re.compile(r"^[A-Z][A-Z0-9]+$")
+REPO_RE = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
+COMPONENT_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# Repository layout: one repo (single, the default), or one repo per service:
+# a system repo (intents, parent specs, the Service map; no service code) and
+# service repos, each set up from the answers file the system repo writes.
+ROLES = ("single", "system", "service")
+SYSTEM_STAGES_OFF = ("build", "pr_review", "test", "deploy", "maintain")
+ROLE_KEYS = ("role", "repo", "system_repo", "component")
+SERVICES_DIR = "services"
 
 # --------------------------------------------------------------------------- answers
 
@@ -89,6 +102,21 @@ def normalize(answers):
     stages = {s: True for s in STAGES}
     stages.update(a.get("stages") or {})
     a["stages"] = {s: bool(stages[s]) for s in STAGES}
+    a.setdefault("role", "single")
+    if a["role"] not in ROLES:
+        errors.append(f"role must be one of {', '.join(ROLES)}")
+    elif a["role"] == "system":
+        if not REPO_RE.match(a.get("repo") or ""):
+            errors.append("repo must be this system repo as owner/name")
+        # The system repo holds no service code: the services build, test and ship it.
+        a["stages"].update({s: False for s in SYSTEM_STAGES_OFF})
+    elif a["role"] == "service":
+        if not REPO_RE.match(a.get("system_repo") or ""):
+            errors.append("system_repo must be the system repo as owner/name")
+        if not COMPONENT_RE.match(a.get("component") or ""):
+            errors.append("component must be this service's kebab-case component name in the system repo")
+        if a.get("repo") and not REPO_RE.match(a["repo"]):
+            errors.append("repo must be this service repo as owner/name")
     a["models"] = {**DEFAULT_MODELS, **(a.get("models") or {})}
     # Automatic Build: plan PR, then build, for each story in turn (sdlc-build.yml).
     a["auto_build"] = bool(a.get("auto_build", True))
@@ -115,8 +143,10 @@ def normalize(answers):
             errors.append(f"owners.{role} must be @user or @org/team")
     owners.setdefault("security_owner", owners.get("tech_lead", ""))
     for c in a.setdefault("components", []):
-        if not re.match(r"^[a-z0-9][a-z0-9-]*$", c.get("name", "")):
+        if not COMPONENT_RE.match(c.get("name", "")):
             errors.append(f"component name {c.get('name')!r} must be kebab-case")
+        if c.get("repo") and not REPO_RE.match(c["repo"]):
+            errors.append(f"component {c.get('name')!r}: repo must be owner/name")
 
     jira = a.setdefault("jira", {"enabled": False})
     if jira.get("enabled"):
@@ -177,6 +207,8 @@ def render_owners(a):
             for role in ("product_owner", "service_owner", "tech_lead"):
                 lines.append(f"    {role}: {q(c.get(role) or o[role])}")
             lines.append(f"    jira_components: {json.dumps(c.get('jira_components', []))}")
+            if c.get("repo"):
+                lines.append(f"    repo: {q(c['repo'])}     # one repo per service: where this service's code lives")
     return "\n".join(lines) + "\n"
 
 
@@ -408,6 +440,16 @@ def render_claude_block(a):
         rows.append("| Deploy | `/sdlc:release` | `releases/<version>.md`, tag | release PR merged; production approved in its environment |")
     if s["maintain"]:
         rows.append("| Maintain | scheduled checks in `.sdlc/maintain.json` | new intents | owner triages the intent PR |")
+    layout = ""
+    if a["role"] == "system":
+        layout = ("- **System repo** (one repo per service): intents, specs and the Service map\n"
+                  "  live here; no service code. Each service in `.sdlc/owners.yaml` (`repo:`) is\n"
+                  f"  set up from `{SERVICES_DIR}/<repo>.answers.json` with `/sdlc:init system={a['repo']}`;\n"
+                  "  `/sdlc:init services` shows which are set up.\n")
+    elif a["role"] == "service":
+        layout = (f"- **Service `{a['component']}`** of `{a['system_repo']}` (one repo per service):\n"
+                  "  changes inside this service run the loop here; changes that span services\n"
+                  "  start in the system repo.\n")
     return f"""{BEGIN}
 ## SDLC loop (sdlc plugin)
 
@@ -418,7 +460,7 @@ This repo uses the `sdlc` plugin from `{a['sdlc_repo']}` at `{a['sdlc_ref']}`
 |---|---|---|---|
 {chr(10).join(rows)}
 
-- One artifact per PR on its own branch (`intent/`, `spec/`, `design/`,
+{layout}- One artifact per PR on its own branch (`intent/`, `spec/`, `design/`,
   `plan/`, `story/`, `release/`; a spec PR also carries its UI mockups);
   never commit them straight to `{a['base_branch']}`.
 - Status lives in git: open PR = proposed, merged = accepted, closed = rejected.
@@ -599,9 +641,10 @@ def render_callers(a):
             a, "sdlc-spec-to-stories.yml",
             extra_with="      spec_file: ${{ inputs.rerun == 'spec-to-stories' && inputs.file || '' }}\n",
             needs="changes", if_expr=on_merge("specs", "spec-to-stories")))
-    auto_stack = s["design"] and s["build"]
+    # The system repo builds nothing, but its specs still record the Service map.
+    auto_stack = s["design"] and (s["build"] or a["role"] == "system")
     if auto_stack:
-        # A merged spec's stack and cloud decision becomes a stack PR for the tech lead.
+        # A merged spec's stack, cloud and repository layout decision becomes a stack PR for the tech lead.
         jobs.append("  stack:\n" + call(
             a, "sdlc-spec-to-stack.yml",
             extra_with=f"      model: {m['stack']}\n      spec_file: ${{{{ inputs.rerun == 'stack' && inputs.file || '' }}}}\n",
@@ -730,9 +773,7 @@ def merge_gitignore(text):
 def plan_files(root, a, force=False):
     """{relpath: (new_content, kind)} with kind in managed | once | merged."""
     root = Path(root)
-    out = {".sdlc/sdlc.json": (json.dumps({k: a[k] for k in ("sdlc_repo", "sdlc_ref", "base_branch", "maintain_cron", "stages",
-                                                             "auto_build", "autofix_attempts", "workflows", "models", "budgets")},
-                                          indent=2) + "\n", "managed")}
+    out = {".sdlc/sdlc.json": (render_sdlc_json(a), "managed")}
     once = {
         ".sdlc/owners.yaml": render_owners(a), ".sdlc/jira.yaml": render_jira(a), ".sdlc/build.yaml": render_build(a),
         ".sdlc/review.json": render_review(a), ".sdlc/deploy.yaml": render_deploy(a),
@@ -750,8 +791,14 @@ def plan_files(root, a, force=False):
         want = jira_settings(once[".sdlc/jira.yaml"])
         if have != want:
             out[".sdlc/jira.yaml"] = (once[".sdlc/jira.yaml"], "once")
-    for rel, content in render_callers(a).items():
+    callers = render_callers(a)
+    for rel, content in callers.items():
         out[rel] = (content, "managed")
+    # A caller whose stages are all off now (a system repo's Maintain) is removed, not left running.
+    for p in sorted((root / ".github" / "workflows").glob("sdlc-*.yml")):
+        rel = p.relative_to(root).as_posix()
+        if rel not in callers and "# Generated by /sdlc:init" in p.read_text(encoding="utf-8"):
+            out[rel] = (None, "managed")
     claude = root / "CLAUDE.md"
     out["CLAUDE.md"] = (merge_claude_md(claude.read_text(encoding="utf-8") if claude.is_file() else "",
                                         render_claude_block(a)), "merged")
@@ -763,7 +810,136 @@ def plan_files(root, a, force=False):
     for folder in FOLDERS:
         if not (root / folder).is_dir():
             out[f"{folder}/.gitkeep"] = ("", "once")
+    if a["role"] == "system":
+        for comp in system_components(root, a):
+            rel = service_answers_path(comp["repo"])
+            p = root / rel
+            existing = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+            out[rel] = (json.dumps(service_answers(a, comp, existing), indent=2) + "\n", "merged")
     return out
+
+
+def render_sdlc_json(a):
+    keys = ["sdlc_repo", "sdlc_ref", "base_branch", "maintain_cron", "stages",
+            "auto_build", "autofix_attempts", "workflows", "models", "budgets"]
+    # A single repo's sdlc.json stays as it was before layouts existed.
+    if a["role"] != "single":
+        keys += [k for k in ROLE_KEYS if a.get(k)]
+    return json.dumps({k: a[k] for k in keys}, indent=2) + "\n"
+
+
+# --------------------------------------------------------------------------- one repo per service
+
+
+def read_components(text):
+    """The components in an owners.yaml text: [{"name", roles..., "jira_components", "repo"}]."""
+    comps, inside, cur = [], False, None
+    for raw in text.splitlines():
+        if re.match(r"^components\s*:", raw):
+            inside = True
+            continue
+        if not inside or not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        if re.match(r"^\S", raw):
+            break
+        m = re.match(r"^  ([a-z0-9][a-z0-9-]*)\s*:\s*$", raw)
+        if m:
+            cur = {"name": m.group(1)}
+            comps.append(cur)
+            continue
+        m = re.match(r"^    ([a-z_]+)\s*:\s*(.*)$", raw)
+        if m and cur is not None:
+            key, val = m.group(1), m.group(2).strip()
+            if val.startswith("["):
+                val = val[:val.index("]") + 1] if "]" in val else val
+                cur[key] = [v.strip().strip("'\"") for v in val.strip("[]").split(",") if v.strip()]
+            else:
+                cur[key] = re.sub(r"\s+#.*$", "", val).strip().strip("'\"")
+    return comps
+
+
+def system_components(root, a):
+    """The services of a system repo: components with a repo, from owners.yaml once it exists."""
+    owners = Path(root) / ".sdlc" / "owners.yaml"
+    comps = read_components(owners.read_text(encoding="utf-8")) if owners.is_file() else a["components"]
+    return [c for c in comps if c.get("repo")]
+
+
+def service_answers_path(repo):
+    return f"{SERVICES_DIR}/{repo.split('/')[-1]}.answers.json"
+
+
+def service_answers(a, comp, existing=None):
+    """The answers a service repo is set up from (/sdlc:init system=<the system repo>).
+
+    Shared settings follow the system repo on every regeneration (the plugin
+    tag, Jira, owners, models, budgets); the service's own settings (stages,
+    stack) are kept once written.
+    """
+    o, existing = a["owners"], existing or {}
+    owners = {r: comp.get(r) or o[r] for r in ("product_owner", "service_owner", "tech_lead")}
+    owners["security_owner"] = o["security_owner"]
+    jira = {k: a["jira"][k] for k in ("enabled", "site", "space_key") if k in a["jira"]}
+    return {
+        "_comment": (f"Set up {comp['repo']} from this file: run /sdlc:init system={a['repo']} in that repo. "
+                     "Written by the system repo; edit the service's stages and stack here through a PR."),
+        "role": "service", "system_repo": a["repo"], "component": comp["name"], "repo": comp["repo"],
+        "sdlc_repo": a["sdlc_repo"], "sdlc_ref": a["sdlc_ref"], "base_branch": existing.get("base_branch", "main"),
+        "owners": owners, "jira": jira,
+        "stages": existing.get("stages", {"ui_design": False}),
+        "auto_build": a["auto_build"], "autofix_attempts": a["autofix_attempts"], "workflows": a["workflows"],
+        "models": a["models"], "budgets": a["budgets"],
+        "stack": existing.get("stack", {}),
+    }
+
+
+def origin_repo(root):
+    """owner/name of the repo's GitHub origin remote, or None."""
+    import subprocess
+    try:
+        r = subprocess.run(["git", "remote", "get-url", "origin"], cwd=root, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"github\.com[:/]([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?/?$", r.stdout.strip())
+    return m.group(1) if r.returncode == 0 and m else None
+
+
+def set_layout(root, services):
+    """Record a spec's one-repo-per-service decision: this repo becomes the system repo.
+
+    Writes .sdlc/sdlc.json (role system), the services into .sdlc/owners.yaml
+    (added or updated, never removed) and one services/<repo>.answers.json per
+    service. The workflow callers follow on the next /sdlc:init (a bot cannot
+    change workflow files).
+    """
+    root = Path(root)
+    sdlc = load_sdlc(root)
+    if sdlc is None:
+        raise SystemExit("no .sdlc/sdlc.json: run /sdlc:init first")
+    repo = sdlc.get("repo") or os.environ.get("GITHUB_REPOSITORY") or origin_repo(root)
+    owners_path = root / ".sdlc" / "owners.yaml"
+    comps = {c["name"]: c for c in read_components(owners_path.read_text(encoding="utf-8"))} if owners_path.is_file() else {}
+    for s in services:
+        comp = comps.setdefault(s["component"], {"name": s["component"]})
+        comp["repo"] = s["repo"]
+        comp.update({r: h for r, h in (s.get("owners") or {}).items() if h and r in ("product_owner", "service_owner", "tech_lead")})
+    a, errors = normalize({**sdlc, **existing_answers(root), "role": "system", "repo": repo, "components": list(comps.values())})
+    if errors:
+        raise SystemExit("cannot record the layout: " + "; ".join(errors))
+    write_lf(root / ".sdlc" / "sdlc.json", render_sdlc_json(a))
+    write_lf(owners_path, render_owners(a))
+    written = [".sdlc/sdlc.json", ".sdlc/owners.yaml"]
+    for s in services:
+        rel = service_answers_path(s["repo"])
+        p = root / rel
+        existing = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        existing["stages"] = {**existing.get("stages", {}), "ui_design": bool(s.get("ui"))}
+        if s.get("stack"):
+            existing["stack"] = s["stack"]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        write_lf(p, json.dumps(service_answers(a, comps[s["component"]], existing), indent=2) + "\n")
+        written.append(rel)
+    return written
 
 
 def apply(root, planned):
@@ -773,6 +949,10 @@ def apply(root, planned):
         old = p.read_text(encoding="utf-8") if p.is_file() else None
         if old == content:
             report.append(("unchanged", rel))
+            continue
+        if content is None:
+            p.unlink()
+            report.append(("removed", rel))
             continue
         p.parent.mkdir(parents=True, exist_ok=True)
         write_lf(p, content)
@@ -938,11 +1118,57 @@ STACK_TEXT_KEYS = ["setup_command", "install_command", "test_command", "test_fil
                    "check_command", "lint_command", "format_command", "ui_library", "results_path", "evidence_path"]
 
 
+LAYOUTS = ("one-repo", "per-service")
+
+
+def validate_services(services):
+    """Problems with the services of a one-repo-per-service decision (the spec's Service map)."""
+    if not isinstance(services, list) or not services:
+        return ["layout per-service needs services: one entry per row of the spec's Service map"]
+    errors, names, repos = [], set(), set()
+    for i, s in enumerate(services):
+        if not isinstance(s, dict):
+            errors.append(f"services[{i}] must be an object")
+            continue
+        name = s.get("component", "")
+        where = f"services[{name or i}]"
+        if not COMPONENT_RE.match(str(name)):
+            errors.append(f"{where}: component must be kebab-case")
+        if not REPO_RE.match(str(s.get("repo", ""))):
+            errors.append(f"{where}: repo must be owner/name")
+        if name in names or str(s.get("repo", "")).lower() in repos:
+            errors.append(f"{where}: each component and repo appears once")
+        names.add(name)
+        repos.add(str(s.get("repo", "")).lower())
+        owners = s.get("owners") or {}
+        if not isinstance(owners, dict) or any(v and not HANDLE_RE.match(str(v)) for v in owners.values()):
+            errors.append(f"{where}: owners must map roles to @user or @org/team")
+        if not isinstance(s.get("ui", False), bool):
+            errors.append(f"{where}: ui must be true or false")
+        stack = s.get("stack") or {}
+        if not isinstance(stack, dict) or "layout" in stack:
+            errors.append(f"{where}: stack must be a stack object (or empty: the service's first spec decides it)")
+        elif stack:
+            errors += [f"{where}.stack: {e}" for e in validate_stack(stack)]
+    return errors
+
+
 def validate_stack(stack):
     """Problems with a proposed stack (empty list = can be recorded)."""
     errors = []
     if not isinstance(stack, dict):
         return ["the stack must be a JSON object"]
+    layout = stack.get("layout", "one-repo")
+    if layout not in LAYOUTS:
+        return [f"layout must be one of {', '.join(LAYOUTS)}"]
+    if layout == "per-service":
+        # This repo becomes the system repo: no code of its own, so no stack of its own.
+        errors = validate_services(stack.get("services"))
+        if stack.get("toolchains") or any(stack.get(k) for k in STACK_TEXT_KEYS) or stack.get("deploy"):
+            errors.append("layout per-service: the system repo has no code; put each service's stack in services[].stack")
+        return errors
+    if stack.get("services"):
+        errors.append("services are only for layout per-service")
     chains = stack.get("toolchains", [])
     if not isinstance(chains, list):
         errors.append("toolchains must be a list like [\"node@22\"]")
@@ -1131,7 +1357,76 @@ def check_stack_files(root):
     if deploy.is_file():
         dc = _load_module("deploy_config", Path(__file__).resolve().parents[2] / "release" / "scripts" / "deploy_config.py")
         errors += [f".sdlc/deploy.yaml: {e}" for e in dc.errors(dc.load(root))]
+    sdlc = load_sdlc(root) or {}
+    for p in sorted((root / SERVICES_DIR).glob("*.answers.json")):
+        rel = p.relative_to(root).as_posix()
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            errors.append(f"{rel}: not JSON ({exc})")
+            continue
+        _, problems = normalize(data)
+        errors += [f"{rel}: {e}" for e in problems]
+        if data.get("role") != "service" or str(data.get("system_repo", "")).lower() != str(sdlc.get("repo", "")).lower():
+            errors.append(f"{rel}: must be role service with system_repo {sdlc.get('repo')!r} (this repo)")
+        if data.get("stack"):
+            errors += [f"{rel}: stack: {e}" for e in validate_stack(data["stack"])]
     return errors
+
+
+def fetch_service_answers(root, system_repo, run=None):
+    """This service repo's answers from the system repo: (answers, errors)."""
+    if not REPO_RE.match(system_repo or ""):
+        return None, ["system must be the system repo as owner/name"]
+    me = (gh_json(["repo", "view", "--json", "nameWithOwner"], root, run) or {}).get("nameWithOwner") or origin_repo(root)
+    if not me:
+        return None, ["cannot tell which GitHub repo this is: add the origin remote, or sign in to gh"]
+    rel = service_answers_path(me)
+    data = gh_json(["api", f"repos/{system_repo}/contents/{rel}", "-H", "Accept: application/vnd.github.raw"], root, run)
+    if not isinstance(data, dict):
+        return None, [f"{system_repo} has no {rel}: its Service map has no service in {me} (or gh cannot read it). "
+                      "Check the repo name against the system repo's .sdlc/owners.yaml."]
+    errors = repo_mismatch(data, me)
+    if str(data.get("system_repo", "")).lower() != system_repo.lower():
+        errors.append(f"{rel} names system_repo {data.get('system_repo')!r}, not {system_repo}")
+    errors += normalize(data)[1]
+    return data, errors
+
+
+def repo_mismatch(answers, actual):
+    """A service's answers must be used in that service's repo."""
+    want = str(answers.get("repo", ""))
+    if answers.get("role") == "service" and want and actual and want.lower() != actual.lower():
+        return [f"these answers are for {want}, but this repo is {actual}"]
+    return []
+
+
+def services_status(root, run=None):
+    """Each service of a system repo: does its repo exist, and is it set up from the system repo?"""
+    sdlc = load_sdlc(root) or {}
+    if sdlc.get("role") != "system":
+        return None
+    system = sdlc["repo"]
+    out = []
+    for c in system_components(root, {"components": []}):
+        repo = c["repo"]
+        exists = gh_json(["api", f"repos/{repo}", "--jq", "{name: .name}"], root, run) is not None
+        cfg = gh_json(["api", f"repos/{repo}/contents/.sdlc/sdlc.json", "-H", "Accept: application/vnd.github.raw"],
+                      root, run) if exists else None
+        cfg = cfg if isinstance(cfg, dict) else {}
+        set_up = (cfg.get("role") == "service" and str(cfg.get("system_repo", "")).lower() == system.lower()
+                  and cfg.get("component") == c["name"])
+        if not exists:
+            step = f"create the repo {repo}, then run /sdlc:init system={system} in it and merge the setup PR"
+        elif not set_up:
+            step = f"run /sdlc:init system={system} in {repo} and merge the setup PR"
+        elif cfg.get("sdlc_ref") != sdlc.get("sdlc_ref"):
+            step = f"ready; pinned to {cfg.get('sdlc_ref')} while the system repo is on {sdlc.get('sdlc_ref')}: upgrade it"
+        else:
+            step = "ready"
+        out.append({"component": c["name"], "repo": repo, "exists": exists, "set_up": set_up,
+                    "sdlc_ref": cfg.get("sdlc_ref"), "next": step})
+    return out
 
 
 def load_build_yaml(path):
@@ -1216,6 +1511,11 @@ def checklist(a):
     if a["stages"]["ui_design"]:
         extra.append("  7. UI design: mockups come with every spec PR. To refine them in Figma, a designer\n"
                      "     logs in (/mcp), sets FIGMA_TOKEN, and runs /sdlc:design-ui from=mockups.")
+    if a["role"] == "system":
+        extra.append(f"  8. Services: once the Service map is recorded, create each repo it names (under the same\n"
+                     f"     owner, so one sdlc-bot App reaches them all) and run /sdlc:init system={a['repo']} in it.\n"
+                     "     /sdlc:init services shows which are set up. Organization-level secrets, variables and\n"
+                     "     rulesets save repeating steps 2 to 4 in every service repo.")
     return SETUP_CHECKLIST.format(
         repo=a["sdlc_repo"], base=a["base_branch"],
         checks=", ".join(required_checks(a["stages"])) or "none for the enabled stages",
@@ -1240,6 +1540,10 @@ def main():
                       help="validate .sdlc/build.yaml and .sdlc/deploy.yaml as they are (the stack PR check)")
     mode.add_argument("--discover", action="store_true",
                       help="what the repo already has (gh): suggested answers and missing variables/secrets, as JSON")
+    mode.add_argument("--fetch-service-answers", metavar="SYSTEM_REPO",
+                      help="one repo per service: read this repo's answers from the system repo (gh), as JSON")
+    mode.add_argument("--services-status", action="store_true",
+                      help="system repo: is each service repo created and set up (gh), as JSON")
     ap.add_argument("--force", action="store_true", help="also rewrite the create-once config files")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -1255,12 +1559,26 @@ def main():
     if args.discover:
         print(json.dumps(discover(root), indent=2))
         return 0
+    if args.fetch_service_answers:
+        data, problems = fetch_service_answers(root, args.fetch_service_answers)
+        for p in problems:
+            print(f"::error::{p}", file=sys.stderr)
+        if data is not None and not problems:
+            print(json.dumps(data, indent=2))
+        return 1 if problems else 0
+    if args.services_status:
+        status = services_status(root)
+        if status is None:
+            print("::error::not a system repo (role system in .sdlc/sdlc.json)", file=sys.stderr)
+            return 1
+        print(json.dumps(status, indent=2))
+        return 0
     if args.check_stack_files:
         problems = check_stack_files(root)
         for p in problems:
             print(f"::error::{p}", file=sys.stderr)
         if not problems:
-            print("OK: .sdlc/build.yaml and .sdlc/deploy.yaml")
+            print("OK: .sdlc/build.yaml, .sdlc/deploy.yaml and the services' answers")
         return 1 if problems else 0
     if args.stack:
         stack = json.loads(Path(args.stack).read_text(encoding="utf-8"))
@@ -1271,6 +1589,10 @@ def main():
             return 1
         if args.dry_run:
             print("OK: the stack can be recorded")
+            return 0
+        if stack.get("layout") == "per-service":
+            written = set_layout(root, stack["services"])
+            print("recorded one repo per service (this is now the system repo): " + ", ".join(written))
             return 0
         path = set_stack(root, stack)
         print(f"recorded the stack in {path.as_posix()}"
@@ -1291,7 +1613,12 @@ def main():
         raw = {**sdlc, **existing_answers(root), "sdlc_ref": args.upgrade}
     else:
         raw = json.loads(Path(args.answers).read_text(encoding="utf-8"))
+        # Re-running init never drops a recorded layout: answers without a role keep this repo's.
+        if "role" not in raw:
+            raw = {**{k: v for k, v in (load_sdlc(root) or {}).items() if k in ROLE_KEYS}, **raw}
     a, errors = normalize(raw)
+    if not args.upgrade:
+        errors += repo_mismatch(a, origin_repo(root))
     if errors:
         for e in errors:
             print(f"::error::{e}", file=sys.stderr)

@@ -133,6 +133,40 @@ own token, which can read any public repo. For a client, consider pinning a
 release by its commit SHA instead of the tag, so the code they run cannot
 change under them.
 
+## One repo, or one repo per service
+
+The repository layout is decided like the stack: `/sdlc:init` asks for it
+(one repo, one repo per service, or decide from the spec later), and the
+spec's Technology and architecture section records the tech lead's
+decision (`Repository layout:`). The trade-offs are in
+`plugins/sdlc/skills/write-spec/reference/repository-layout.md`.
+
+- **One repo** (one service, or several services in folders): nothing
+  changes; this guide as above.
+- **One repo per service**:
+  1. Set up the **system repo** first, as above. It holds intents, specs and
+     the Service map; it has no code, so it needs no stack, no deploy
+     environments and no Maintain checks.
+  2. When a spec with the Service map merges, the stack PR records it:
+     `.sdlc/sdlc.json` (`role: system`), the services in `.sdlc/owners.yaml`
+     (`repo:`), and `services/<repo>.answers.json` for each. If this repo
+     was not a system repo yet, run `/sdlc:init` on the stack PR's branch
+     before merging, so the workflow callers follow (a bot cannot change
+     workflow files).
+  3. **Create each service repo** the Service map names, under the same
+     owner, so one sdlc-bot App reaches them all. In each, run
+     `/sdlc:init system=<owner/system-repo>`: it reads that repo's answers
+     from the system repo and asks only what they do not cover. Then steps
+     2.3 to 2.8 above for that repo (App, secrets, branch protection,
+     environments).
+  4. `/sdlc:init services` in the system repo lists every service repo,
+     whether it exists and is set up, and what to do next.
+
+  Organization-level secrets and variables (`SDLC_APP_ID`,
+  `SDLC_APP_PRIVATE_KEY`, `ANTHROPIC_API_KEY`, Jira), installing the App on
+  all repositories, and an organization ruleset for the required checks
+  save repeating steps 2.3 to 2.5 in every service repo.
+
 ## Upgrading
 
 `/sdlc:init upgrade=vX.Y.Z` (or `init_project.py --upgrade vX.Y.Z`) moves

@@ -51,6 +51,84 @@ OQ_ROW_RE = re.compile(r"^\|\s*OQ-\d+\s*\|(.*)$", re.MULTILINE)
 STORY_RE = re.compile(r"^###\s+(S\d+):\s*(\S.*?)\s*$", re.MULTILINE)
 MAX_WORDS = 2000
 MAX_STORIES = 12
+# Repository layout, decided like the stack (init_project.py --stack records it).
+# Longest value first: "one repo per service" also starts with "one repo".
+LAYOUT_RE = re.compile(r"^(?:- )?\**Repository layout:?\**:?\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+LAYOUTS = [("one repo per service", "per-service"), ("one repo", "one-repo"), ("decision needed", "open")]
+SERVICE_MAP_COLUMNS = ["Component", "Responsibility", "Owns data", "Repo", "Stack", "UI",
+                       "Product owner", "Service owner", "Tech lead"]
+COMPONENT_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+REPO_RE = re.compile(r"^(?:[A-Za-z0-9-]+/)?[A-Za-z0-9._-]+$")
+
+
+def parse_layout(text):
+    """(layout, raw) from the 'Repository layout:' line: one-repo, per-service, open; (None, None) if absent."""
+    m = LAYOUT_RE.search(text)
+    if not m:
+        return None, None
+    raw = m.group(1).strip("* ")
+    for words, key in LAYOUTS:
+        if raw.lower().startswith(words):
+            return key, raw
+    return "invalid", raw
+
+
+def parse_service_map(text):
+    """Rows of the Service map table (header starting '| Component |'): [{column: cell}], or None if absent."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if line.lstrip().startswith("|") and cells and cells[0].lower() == "component":
+            rows = []
+            for row in lines[i + 1:]:
+                if not row.lstrip().startswith("|"):
+                    break
+                vals = [c.strip() for c in row.strip().strip("|").split("|")]
+                if all(re.fullmatch(r":?-{3,}:?", v) for v in vals):
+                    continue
+                rows.append(dict(zip(cells, vals)))
+            return cells, rows
+    return None, None
+
+
+def check_layout(text):
+    """Errors in the Repository layout line and the Service map of 'Technology and architecture'."""
+    errors = []
+    layout, raw = parse_layout(text)
+    header, rows = parse_service_map(text)
+    if layout == "invalid":
+        errors.append(f"'Repository layout: {raw}' must start with one of: {', '.join(w for w, _ in LAYOUTS)}")
+    if header is None:
+        if layout == "per-service":
+            errors.append("Repository layout is one repo per service: add the Service map table "
+                          f"(| {' | '.join(SERVICE_MAP_COLUMNS)} |) with one row per service")
+        return errors
+    if layout == "one-repo":
+        errors.append("a Service map is only for 'Repository layout: one repo per service'")
+    if header != SERVICE_MAP_COLUMNS:
+        errors.append(f"Service map columns must be exactly | {' | '.join(SERVICE_MAP_COLUMNS)} |")
+        return errors
+    if not rows:
+        errors.append("Service map needs one row per service")
+    seen, repos = set(), set()
+    for r in rows:
+        name, repo = r.get("Component", "").strip("`"), r.get("Repo", "").strip("`")
+        if not COMPONENT_RE.match(name):
+            errors.append(f"Service map: component {name!r} must be kebab-case")
+        if not REPO_RE.match(repo):
+            errors.append(f"Service map: repo {repo!r} for {name!r} must be a repo name or owner/name")
+        if name in seen or repo.split("/")[-1].lower() in repos:
+            errors.append(f"Service map: {name!r} and its repo must appear once")
+        seen.add(name)
+        repos.add(repo.split("/")[-1].lower())
+        if r.get("UI", "").lower() not in ("yes", "no"):
+            errors.append(f"Service map: UI for {name!r} must be yes or no")
+        for col in ("Product owner", "Service owner", "Tech lead"):
+            if not vi.OWNER_RE.match(r.get(col, "").strip('`"')):
+                errors.append(f"Service map: {col} for {name!r} must be @user or @org/team")
+        if not r.get("Responsibility") or not r.get("Owns data"):
+            errors.append(f"Service map: say what {name!r} is responsible for and which data it owns (or 'none')")
+    return errors
 
 
 def parse_stories(body):
@@ -151,6 +229,7 @@ def validate(path, owners=None, root="."):
 
     if "Requirements" in sections and not REQ_ROW_RE.search(sections["Requirements"]):
         errors.append("section 'Requirements' needs at least one '| REQ-<n> | ... |' row")
+    errors += check_layout(sections.get("Technology and architecture", ""))
     if "Security considerations" in sections and not SEC_ROW_RE.search(sections["Security considerations"]):
         errors.append("section 'Security considerations' needs at least one '| SEC-<n> | ... |' or '| INF-<n> | ... |' row (security-policy, infra-policy)")
 

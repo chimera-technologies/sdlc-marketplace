@@ -83,6 +83,29 @@ Follow the template's headings exactly, in order.
     Say how the design's Tokens map to its theme. `/sdlc:init stack=`
     records it as `ui_library` in `.sdlc/build.yaml`; the build uses it for
     every standard element.
+  - **Repository layout** is part of the same decision: one line,
+    `Repository layout: one repo` (one service, or several services in one
+    repo) or `Repository layout: one repo per service` (this repo becomes
+    the system repo: intents, specs and the Service map, no service code;
+    each service gets its own repo). An existing project states what it has
+    (`.sdlc/sdlc.json` `role`: `system` means one repo per service). For a
+    new one, compare the two against
+    `${CLAUDE_SKILL_DIR}/reference/repository-layout.md`, recommend one, and
+    write `Repository layout: decision needed` with "Decision needed from:
+    tech lead". One repo per service (decided or recommended) adds the
+    **Service map** right under that line, one row per service this spec
+    adds or changes:
+
+    | Component | Responsibility | Owns data | Repo | Stack | UI | Product owner | Service owner | Tech lead |
+    |---|---|---|---|---|---|---|---|---|
+    | orders | Cart, checkout, order history | carts, orders | shop-orders | Java 21, Maven | no | @ord-po | @org/ord-sre | @be-lead |
+
+    Component: kebab-case, the name in `.sdlc/owners.yaml`. Repo: one naming
+    pattern for all (`<product>-<component>`). Owns data: the tables or
+    stores only this service reads and writes, or `none`. UI: `yes` when it
+    has screens. Owners: from `.sdlc/owners.yaml`, or the people the intent
+    names for a new service. `/sdlc:init stack=` records the map; the
+    services' repos are then set up from it.
   - **Code quality commands** go with the stack: the whole-project static
     checks (linter and type checker, `check_command`), and the per-file
     linter and formatter the hooks run after each write (`lint_command`,
