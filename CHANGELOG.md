@@ -15,6 +15,9 @@ tag in `.sdlc/sdlc.json`; move to a newer one with
   reads any public repo. Projects under the marketplace's owner work exactly
   as before. Such a project needs its own sdlc-bot App and its own secrets:
   see "A project in another account or organization" in docs/adoption.md.
+- The marketplace's own CI runs on every PR again, documentation-only ones
+  too: skipping them (v0.26.0) left their required checks waiting forever,
+  so a README PR could not merge without an admin bypass.
 
 **Upgrading**
 

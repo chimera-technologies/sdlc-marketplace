@@ -1,12 +1,12 @@
 name: CI
 
-# Fast, no-API checks on every PR to the marketplace. Make "CI / test" a required
-# status check on main. They run once, on the PR (not again on main after the merge),
-# not for documentation-only changes (README, docs/), and a newer push cancels the older run.
+# Fast, no-API checks on every PR to the marketplace; they are the required status checks
+# on main. They run once, on the PR (not again on main after the merge), and a newer push
+# cancels the older run. Every PR runs them, documentation-only ones too: a required check
+# that never starts blocks the merge (and on a public repo the minutes are free).
 
 on:
   pull_request:
-    paths-ignore: ["README.md", "docs/**"]   # documentation only; skills are .md too, so not **.md
 
 concurrency:
   group: ci-${{ github.event.pull_request.number }}
