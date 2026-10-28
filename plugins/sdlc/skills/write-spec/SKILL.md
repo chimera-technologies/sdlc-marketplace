@@ -106,6 +106,30 @@ Follow the template's headings exactly, in order.
     has screens. Owners: from `.sdlc/owners.yaml`, or the people the intent
     names for a new service. `/sdlc:init stack=` records the map; the
     services' repos are then set up from it.
+  - **Data**, whenever the change stores data: five lines, decided the
+    same way as the stack (what the repo already uses; else options, a
+    recommendation and `Data store: decision needed`):
+
+    ```
+    - **Data store:** PostgreSQL 16, managed on the chosen cloud
+    - **Migrations:** Flyway, versioned SQL files in `db/migrations/`
+    - **Test database:** Testcontainers in the tests; locally the `db` service of `compose.yaml`
+    - **Test data:** each test creates its own with factories; reference data seeded from `db/seed/`; a demo data generator for staging
+    - **Run locally:** `npm run dev:all` (database, migrations, seed, backend, frontend); ready when http://localhost:3000/healthz answers
+    ```
+
+    Schema changes go only through migration files; tests never depend on
+    data that already exists, and production data is never copied to test
+    or staging unless anonymized. A change with no stored data writes
+    `Data store: none`. `/sdlc:init stack=` records these as
+    `services_command`, `migrations_path` and `dev_command` in
+    `.sdlc/build.yaml`, and `migrate_command` and `seed_command` in
+    `.sdlc/deploy.yaml`; the Run locally URL becomes `dev_check_url`, and
+    CI checks on every PR that the app starts that way from a fresh clone.
+    The story that scaffolds the project (S1) creates
+    them; with a database, give it criteria for them (for example "a fresh
+    clone runs with the Run locally commands", "migrations create the
+    schema on an empty database").
   - **Code quality commands** go with the stack: the whole-project static
     checks (linter and type checker, `check_command`), and the per-file
     linter and formatter the hooks run after each write (`lint_command`,

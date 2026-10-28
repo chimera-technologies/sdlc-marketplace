@@ -71,6 +71,20 @@ folder no runner cleans), and browser tests save a screenshot at the end of
 every test into `evidence_path`, so each test's result and screenshot can be
 recorded (Xray, the test report).
 
+**A database** (a `services_command`, `migrations_path` or `dev_command` in
+`.sdlc/build.yaml`, or the spec's `Data store:` line): run
+`services_command` once before running tests, as CI does. The scaffold
+story also creates what those commands need, following the spec's Data
+lines and the Databases section of the patterns: the local database (for
+example a `compose.yaml` service), `.env.example` with local values only,
+the migration tool and `migrations_path`, the seed script, the
+`dev_command` script, and a "Run locally" section in the README (clone,
+copy `.env.example`, start the database, migrate, seed, run). With a
+`dev_check_url`, the app answers on it once started (a health endpoint), and
+`dev_command` works from a fresh clone with only `.env.example` copied to
+`.env`, without prompts: CI runs it that way on every PR. A story that
+changes the schema adds a new migration file in its Files table.
+
 The plugin's build guard hook blocks any write to the repo's code paths
 until the preflight has succeeded, you are on the story branch, and the
 plan exists. Do not try to bypass it.

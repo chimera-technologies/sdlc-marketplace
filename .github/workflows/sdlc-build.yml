@@ -586,6 +586,7 @@ jobs:
         with:
           require-tests: "true"
           install-if-code: "true"
+          start-services: "true"
 
       - name: Switch to the story branch
         run: |

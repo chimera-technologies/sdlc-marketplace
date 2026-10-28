@@ -4,6 +4,50 @@ Releases of the `sdlc` plugin and its reusable workflows. Projects pin one
 tag in `.sdlc/sdlc.json`; move to a newer one with
 `/sdlc:init upgrade=<tag>`, then do anything listed under **Upgrading**.
 
+## v0.31.0 (2026-10-28)
+
+- **Specs decide the data, like the stack.** Technology and architecture
+  gains optional Data lines: `Data store:`, `Migrations:`, `Test database:`,
+  `Test data:` and `Run locally:`. With a data store named, `validate_spec.py`
+  requires the other four; `Data store: none` or no lines changes nothing.
+- **The stack PR records them**: `services_command` (starts what the tests
+  need, such as `docker compose up -d --wait db`), `migrations_path` and
+  `dev_command` (runs the whole app locally) in `.sdlc/build.yaml`;
+  `migrate_command`, `seed_command` and `seed_environments` in
+  `.sdlc/deploy.yaml`.
+- **A database in CI tests.** The PR, main-tests, build and fix-findings
+  workflows run `services_command` after installing, before the tests.
+- **Migrations in the release.** Each environment runs `migrate_command`,
+  then `seed_command` (staging only by default, so production never gets
+  demo data), then `deploy_command`. All three get `DATABASE_URL` from that
+  environment's secret. A failed migration stops the release; production
+  migrates only after its approval.
+- **CI checks the app starts locally.** With `dev_command` and
+  `dev_check_url` in `.sdlc/build.yaml`, the PR and main-tests runs copy
+  `.env.example` to `.env`, run `dev_command` after the tests, and fail
+  unless `dev_check_url` answers within 3 minutes, so a broken local setup
+  is caught on the PR, not by the next developer.
+- **Hooks protect data.** Commands that drop or wipe a database (`DROP`,
+  `TRUNCATE`, `flyway clean`, `prisma migrate reset`, `rails db:drop`,
+  `FLUSHALL` and the like) are blocked unless it is local: `localhost`, a
+  container, or a host with no dot, read from the command, then from
+  `DATABASE_URL` and similar settings in the environment or `.env`. Editing
+  a migration already on the base branch (under `migrations_path`) is
+  blocked: add a new one.
+- **Build and review know the rules.** The patterns gain a Databases section
+  (migrations only, expand then contract, real database in tests, each test
+  creates its own data, connection from the environment, one command to run
+  locally). The scaffold story creates the local database, `.env.example`,
+  the migrate, seed and dev scripts, and a "Run locally" README section.
+  The review gate and the verifier flag a model change without a migration,
+  an edited merged migration, and a drop or rename the code still needs.
+
+**Upgrading**: nothing to do without a database. With one, add the Data
+lines to the next spec (or set the keys in `.sdlc/build.yaml` and
+`.sdlc/deploy.yaml` yourself), and add a `DATABASE_URL` secret to the
+`staging` and `production` environments. `release.yml` callers need no
+change: the workflow reads the environment's secret.
+
 ## v0.30.0 (2026-10-28)
 
 - **Choose one repo or one repo per service, like the stack.** `/sdlc:init`

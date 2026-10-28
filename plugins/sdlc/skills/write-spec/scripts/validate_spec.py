@@ -59,6 +59,25 @@ SERVICE_MAP_COLUMNS = ["Component", "Responsibility", "Owns data", "Repo", "Stac
                        "Product owner", "Service owner", "Tech lead"]
 COMPONENT_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 REPO_RE = re.compile(r"^(?:[A-Za-z0-9-]+/)?[A-Za-z0-9._-]+$")
+# The data decision: 'Data store:' and, when there is one, how it is changed, tested and run.
+DATA_LINES = ["Data store", "Migrations", "Test database", "Test data", "Run locally"]
+
+
+def data_line(text, label):
+    """The value of a '- **<label>:** value' line (bold and bullet optional), or None if absent."""
+    m = re.search(rf"^(?:- )?\**{re.escape(label)}:?\**:?[ \t]*(.*?)\s*$", text, re.IGNORECASE | re.MULTILINE)
+    return m.group(1).strip("* ") if m else None
+
+
+def check_data(text):
+    """Errors in the data lines of 'Technology and architecture' (all optional until 'Data store:' names one)."""
+    store = data_line(text, "Data store")
+    if store is None or store.lower() == "none" or store.lower().startswith("decision needed"):
+        return []
+    if not store:
+        return ["'Data store:' needs a value: the database, 'none', or 'decision needed'"]
+    return [f"Data store is {store!r}: add '{label}:' (see the write-spec skill's Data item)"
+            for label in DATA_LINES[1:] if not data_line(text, label)]
 
 
 def parse_layout(text):
@@ -230,6 +249,7 @@ def validate(path, owners=None, root="."):
     if "Requirements" in sections and not REQ_ROW_RE.search(sections["Requirements"]):
         errors.append("section 'Requirements' needs at least one '| REQ-<n> | ... |' row")
     errors += check_layout(sections.get("Technology and architecture", ""))
+    errors += check_data(sections.get("Technology and architecture", ""))
     if "Security considerations" in sections and not SEC_ROW_RE.search(sections["Security considerations"]):
         errors.append("section 'Security considerations' needs at least one '| SEC-<n> | ... |' or '| INF-<n> | ... |' row (security-policy, infra-policy)")
 

@@ -250,6 +250,7 @@ jobs:
         uses: ./.sdlc-plugin/.github/actions/setup-stack
         with:
           require-tests: "true"
+          start-services: "true"
 
       - name: Preflight (Graphify, Ponytail)
         if: steps.cmd.outputs.go == 'true' && steps.cmd.outputs.action == 'fix'

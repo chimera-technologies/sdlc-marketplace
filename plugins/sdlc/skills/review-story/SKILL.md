@@ -77,6 +77,13 @@ dependency, build or report folders (`node_modules/`, `.venv/`, `target/`,
    the `ui_library` (a hand-built one the library has is medium).
 7. **Security**: the SEC rules that apply (input validation, no secrets,
    no unsafe HTML, no personal data in logs).
+8. **Data**: a change to the data model (entities, tables, columns) with no
+   new migration file is high; an edited migration that is already on the
+   base branch is high. A migration that drops or renames a column or
+   table that the code still reads, or in the same release that stops
+   writing it, is high (expand, then contract); any other drop or rename
+   is medium, for the tech lead to confirm. Tests that rely on existing
+   data instead of creating their own are medium.
 
 **Large PRs: run the review panel.** Read
 `${CLAUDE_SKILL_DIR}/../../reference/workflows.md` for the setting and the

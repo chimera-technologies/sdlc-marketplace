@@ -2,9 +2,10 @@ name: SDLC setup stack
 description: >-
   Install the toolchains declared in the project's .sdlc/build.yaml
   (node, python, java, dotnet, go, terraform, helm, kubectl) with the
-  official setup actions, run its
-  setup_command and install_command, and expose its test commands. The
-  stack is whatever the spec's tech lead decided; nothing here is fixed.
+  official setup actions, run its setup_command and install_command (and,
+  with start-services, its services_command: the database the tests
+  need), and expose its test commands. The stack is whatever the spec's
+  tech lead decided; nothing here is fixed.
   Used by the sdlc reusable workflows after they check out the plugin into
   .sdlc-plugin/ (uses: ./.sdlc-plugin/.github/actions/setup-stack).
 
@@ -17,6 +18,9 @@ inputs:
     default: "false"
   install-if-code:
     description: "Install the toolchains, but run install_command only once code_paths exist (automatic Build of a first story)"
+    default: "false"
+  start-services:
+    description: "Run services_command after installing (start the database the tests need)"
     default: "false"
 
 outputs:
@@ -35,6 +39,12 @@ outputs:
   results_path:
     description: "Glob of the JUnit XML files the tests write (results_path), or empty"
     value: ${{ steps.stack.outputs.results_path }}
+  dev_command:
+    description: "The command that runs the whole app locally, or empty"
+    value: ${{ steps.stack.outputs.dev_command }}
+  dev_check_url:
+    description: "The URL that answers once dev_command has started the app, or empty"
+    value: ${{ steps.stack.outputs.dev_check_url }}
   evidence_path:
     description: "Folder of the screenshots the browser tests save (evidence_path), or empty"
     value: ${{ steps.stack.outputs.evidence_path }}
@@ -101,4 +111,11 @@ runs:
       shell: bash
       env:
         CMD: ${{ steps.stack.outputs.install_command }}
+      run: bash -euo pipefail -c "$CMD"
+
+    - name: Services command (what the tests need, such as a database)
+      if: inputs.start-services == 'true' && steps.stack.outputs.services_command != ''
+      shell: bash
+      env:
+        CMD: ${{ steps.stack.outputs.services_command }}
       run: bash -euo pipefail -c "$CMD"

@@ -5,13 +5,14 @@ name: "SDLC Deploy - release"
 #   detect          -> validate the record; read .sdlc/deploy.yaml
 #   tag             -> create the tag and GitHub release at the record's commit
 #   staging         -> (environment: staging) cloud login (OIDC); IaC plan and
-#                      apply; deploy_command; smoke_command
+#                      apply; migrate_command; seed_command; deploy_command;
+#                      smoke_command
 #   production-plan -> (environment: production-plan, no reviewers, read-only
 #                      identity) the production IaC plan, shown in the run
 #                      summary for the approvers and saved as an artifact
 #   production      -> (environment: production, waits for its required
 #                      reviewers) applies exactly that saved plan;
-#                      deploy_command; smoke_command
+#                      migrate_command; deploy_command; smoke_command
 #   jira            -> comment "Released in <version>" on each story in the record
 # The cloud (aws, azure, gcp) and IaC tool (terraform) are the architect's
 # choice in the spec, recorded in .sdlc/deploy.yaml; each environment's cloud
@@ -63,6 +64,9 @@ on:
       DEPLOY_TOKEN:
         description: "Passed to deploy_command; an environment secret of the same name overrides it"
         required: false
+      DATABASE_URL:
+        description: "Passed to migrate_command, seed_command and deploy_command; set it as a secret of each environment"
+        required: false
 
 permissions:
   contents: read
@@ -85,6 +89,10 @@ jobs:
       deploys: ${{ steps.cfg.outputs.deploys }}
       deploy_command: ${{ steps.cfg.outputs.deploy_command }}
       smoke_command: ${{ steps.cfg.outputs.smoke_command }}
+      migrate_command: ${{ steps.cfg.outputs.migrate_command }}
+      seed_command: ${{ steps.cfg.outputs.seed_command }}
+      seed_staging: ${{ steps.cfg.outputs.seed_staging }}
+      seed_production: ${{ steps.cfg.outputs.seed_production }}
       cloud: ${{ steps.cfg.outputs.cloud }}
       iac: ${{ steps.cfg.outputs.iac }}
       staging_environment: ${{ steps.cfg.outputs.staging_environment }}
@@ -282,12 +290,27 @@ jobs:
         if: needs.detect.outputs.iac != 'none'
         run: python3 "$IAC" apply --env staging --plan "$RUNNER_TEMP/staging.tfplan"
 
+      - name: Migrate the staging database (migrate_command)
+        if: needs.detect.outputs.migrate_command != ''
+        env:
+          CMD: ${{ needs.detect.outputs.migrate_command }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: bash -euo pipefail -c "$CMD"
+
+      - name: Seed staging (seed_command)
+        if: needs.detect.outputs.seed_staging == 'true'
+        env:
+          CMD: ${{ needs.detect.outputs.seed_command }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: bash -euo pipefail -c "$CMD"
+
       - name: Deploy to staging
         if: needs.detect.outputs.deploy_command != ''
         env:
           CMD: ${{ needs.detect.outputs.deploy_command }}
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
           DEPLOY_TARGET: ${{ vars.DEPLOY_TARGET }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: bash -euo pipefail -c "$CMD"
 
       - name: Smoke test staging (production waits for this)
@@ -457,12 +480,27 @@ jobs:
           cat "$RUNNER_TEMP/plan/production-plan.md" >> "$GITHUB_STEP_SUMMARY"
           python3 "$IAC" apply --env production --plan "$RUNNER_TEMP/plan/production.tfplan"
 
+      - name: Migrate the production database (migrate_command)
+        if: needs.detect.outputs.migrate_command != ''
+        env:
+          CMD: ${{ needs.detect.outputs.migrate_command }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: bash -euo pipefail -c "$CMD"
+
+      - name: Seed production (seed_command)
+        if: needs.detect.outputs.seed_production == 'true'
+        env:
+          CMD: ${{ needs.detect.outputs.seed_command }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: bash -euo pipefail -c "$CMD"
+
       - name: Deploy to production
         if: needs.detect.outputs.deploy_command != ''
         env:
           CMD: ${{ needs.detect.outputs.deploy_command }}
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
           DEPLOY_TARGET: ${{ vars.DEPLOY_TARGET }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: bash -euo pipefail -c "$CMD"
 
       - name: Smoke test production
